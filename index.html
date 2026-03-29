@@ -1,93 +1,124 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ConcursoPrep</title>
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
   <style>
-    body {
-      font-family: Arial;
-      background:#0f172a;
+    body{
+      margin:0;
+      font-family:Arial, sans-serif;
+      background:#07122b;
       color:#fff;
       display:flex;
-      justify-content:center;
       align-items:center;
-      height:100vh;
+      justify-content:center;
+      min-height:100vh;
     }
-    .card {
-      background:#1e293b;
-      padding:30px;
-      border-radius:12px;
+    .card{
+      background:#1c2940;
+      padding:32px;
+      border-radius:16px;
+      width:320px;
       text-align:center;
+      box-shadow:0 10px 30px rgba(0,0,0,.25);
     }
-    button {
-      padding:10px 20px;
-      border:none;
-      border-radius:8px;
+    h1{
+      margin:0 0 12px;
+      font-size:24px;
+    }
+    p{
+      margin:0 0 20px;
+      color:#d7dbe6;
+    }
+    button{
+      border:0;
+      border-radius:10px;
+      padding:12px 18px;
       cursor:pointer;
+      font-size:16px;
+      width:100%;
+    }
+    .error{
+      margin-top:14px;
+      color:#ffb4b4;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+    .ok{
+      margin-top:14px;
+      color:#9ff0b7;
+      font-size:14px;
     }
   </style>
 </head>
-
 <body>
+  <div class="card">
+    <h1>ConcursoPrep</h1>
+    <p>Login com Google</p>
+    <button id="btnLogin">Entrar com Google</button>
+    <div id="status"></div>
+  </div>
 
-<div class="card">
-  <h2>ConcursoPrep</h2>
-  <p>Login com Google</p>
-  <button id="btnLogin">Entrar com Google</button>
-</div>
+  <script>
+    let sbClient = null;
 
-<script>
-let supabase;
-let currentUser = null;
-
-async function initSupabase(){
-  try {
-    const res = await fetch('/api/supabase-config');
-    const cfg = await res.json();
-
-    supabase = window.supabase.createClient(cfg.url, cfg.anonKey);
-
-    console.log("Supabase OK");
-
-  } catch(e){
-    console.error("Erro init:", e);
-  }
-}
-
-async function loginGoogle(){
-  try {
-    if(!supabase){
-      alert("Supabase não carregou");
-      return;
+    function setStatus(message, type){
+      const el = document.getElementById('status');
+      el.className = type === 'error' ? 'error' : 'ok';
+      el.textContent = message || '';
     }
 
-    console.log("Iniciando login...");
+    async function initSupabase(){
+      try{
+        const res = await fetch('/api/supabase-config', { cache: 'no-store' });
+        if(!res.ok){
+          throw new Error('Falha ao carregar /api/supabase-config');
+        }
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
+        const cfg = await res.json();
+        if(!cfg.url || !cfg.anonKey){
+          throw new Error('SUPABASE_URL ou SUPABASE_ANON_KEY ausentes');
+        }
+
+        sbClient = window.supabase.createClient(cfg.url, cfg.anonKey);
+        console.log('Supabase inicializado com sucesso');
+        setStatus('Supabase carregado com sucesso.', 'ok');
+      }catch(err){
+        console.error('Erro ao iniciar Supabase:', err);
+        setStatus('Erro ao iniciar Supabase: ' + err.message, 'error');
       }
-    });
-
-    if(error){
-      console.error(error);
-      alert("Erro login");
     }
 
-  } catch(e){
-    console.error(e);
-  }
-}
+    async function loginGoogle(){
+      try{
+        if(!sbClient){
+          throw new Error('Supabase ainda não foi carregado');
+        }
 
-// conecta botão depois que página carrega
-document.getElementById("btnLogin").addEventListener("click", loginGoogle);
+        console.log('Iniciando login Google...');
+        const { error } = await sbClient.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: window.location.origin
+          }
+        });
 
-initSupabase();
-</script>
+        if(error){
+          throw error;
+        }
+      }catch(err){
+        console.error('Erro no login:', err);
+        setStatus('Erro no login: ' + err.message, 'error');
+      }
+    }
 
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btnLogin').addEventListener('click', loginGoogle);
+      initSupabase();
+    });
+  </script>
 </body>
 </html>
+
