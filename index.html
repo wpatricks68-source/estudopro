@@ -54,7 +54,7 @@
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="card" id="app">
     <h1>ConcursoPrep</h1>
     <p>Login com Google</p>
     <button id="btnLogin">Entrar com Google</button>
@@ -66,8 +66,33 @@
 
     function setStatus(message, type){
       const el = document.getElementById('status');
+      if(!el) return;
       el.className = type === 'error' ? 'error' : 'ok';
       el.textContent = message || '';
+    }
+
+    function renderLoggedIn(session){
+      document.body.innerHTML = `
+        <div style="color:white;text-align:center;">
+          <div style="background:#1c2940;padding:32px;border-radius:16px;min-width:320px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+            <h2 style="margin-top:0;">Logado com sucesso 🎉</h2>
+            <p style="color:#d7dbe6;">${session.user.email}</p>
+            <button id="btnLogout" style="border:0;border-radius:10px;padding:12px 18px;cursor:pointer;font-size:16px;">Sair</button>
+          </div>
+        </div>
+      `;
+
+      const btnLogout = document.getElementById('btnLogout');
+      if(btnLogout){
+        btnLogout.addEventListener('click', async () => {
+          try{
+            await sbClient.auth.signOut();
+            window.location.reload();
+          }catch(err){
+            console.error('Erro ao sair:', err);
+          }
+        });
+      }
     }
 
     async function initSupabase(){
@@ -83,8 +108,22 @@
         }
 
         sbClient = window.supabase.createClient(cfg.url, cfg.anonKey);
-        console.log('Supabase inicializado com sucesso');
-        setStatus('Supabase carregado com sucesso.', 'ok');
+
+        sbClient.auth.onAuthStateChange((event, session) => {
+          console.log('Auth mudou:', event, session);
+          if(session){
+            renderLoggedIn(session);
+          }
+        });
+
+        const sessionResponse = await sbClient.auth.getSession();
+        const session = sessionResponse?.data?.session;
+
+        if(session){
+          renderLoggedIn(session);
+        } else {
+          setStatus('Supabase carregado com sucesso.', 'ok');
+        }
       }catch(err){
         console.error('Erro ao iniciar Supabase:', err);
         setStatus('Erro ao iniciar Supabase: ' + err.message, 'error');
@@ -97,16 +136,15 @@
           throw new Error('Supabase ainda não foi carregado');
         }
 
-        console.log('Iniciando login Google...');
-        const { error } = await sbClient.auth.signInWithOAuth({
+        const response = await sbClient.auth.signInWithOAuth({
           provider: 'google',
           options: {
             redirectTo: window.location.origin
           }
         });
 
-        if(error){
-          throw error;
+        if(response && response.error){
+          throw response.error;
         }
       }catch(err){
         console.error('Erro no login:', err);
@@ -115,7 +153,10 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('btnLogin').addEventListener('click', loginGoogle);
+      const btnLogin = document.getElementById('btnLogin');
+      if(btnLogin){
+        btnLogin.addEventListener('click', loginGoogle);
+      }
       initSupabase();
     });
   </script>
