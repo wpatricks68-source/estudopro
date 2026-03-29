@@ -3020,34 +3020,19 @@ async function initSupabase(){
     const cfg = await res.json();
     if(!cfg.url || !cfg.anonKey) return false;
 
-    supabase = window.supabase.createClient(cfg.url, cfg.anonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        flowType: 'pkce'
-      }
-    });
+    supabase = window.supabase.createClient(cfg.url, cfg.anonKey);
 
     // Ouve mudanças de sessão
     supabase.auth.onAuthStateChange(async (event, session) => {
       if(session?.user){
         currentUser = session.user;
         showUserBar(currentUser);
-        hideError();
         hideLoginScreen();
-        if(window.location.search.includes('code=') || window.location.hash.includes('access_token')){
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
         await loadFromSupabase(currentUser.id);
       } else {
         currentUser = null;
         hideUserBar();
         showLoginScreen();
-        const btn = document.getElementById('btnLoginGoogle');
-        const loading = document.getElementById('loginLoading');
-        if(btn) btn.style.display = 'flex';
-        if(loading) loading.style.display = 'none';
       }
     });
 
@@ -3056,11 +3041,7 @@ async function initSupabase(){
     if(session?.user){
       currentUser = session.user;
       showUserBar(currentUser);
-      hideError();
       hideLoginScreen();
-      if(window.location.search.includes('code=') || window.location.hash.includes('access_token')){
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
       await loadFromSupabase(currentUser.id);
     } else {
       showLoginScreen();
@@ -3084,14 +3065,6 @@ function hideLoginScreen(){
   renderNav();
 }
 
-function handleAuthMessagesFromUrl(){
-  const url = new URL(window.location.href);
-  const error = url.searchParams.get('error_description') || url.searchParams.get('error');
-  if(error){
-    showError(decodeURIComponent(error.replace(/\+/g, ' ')));
-  }
-}
-
 function showUserBar(user){
   const bar = document.getElementById('userBar');
   const av  = document.getElementById('userAvatar');
@@ -3113,23 +3086,14 @@ async function loginGoogle(){
   if(!supabase){ showError('Supabase não configurado. Verifique as variáveis de ambiente no Vercel.'); return; }
   const btn = document.getElementById('btnLoginGoogle');
   const loading = document.getElementById('loginLoading');
-  const redirectTo = window.location.origin + window.location.pathname;
   try {
-    hideError();
     if(btn) btn.style.display = 'none';
     if(loading) loading.style.display = 'block';
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo,
-        skipBrowserRedirect: false,
-        queryParams: {
-          prompt: 'select_account'
-        }
-      }
+      options: { redirectTo: window.location.origin }
     });
     if(error) throw error;
-    return data;
   } catch(e){
     showError('Erro no login: ' + e.message);
     if(btn) btn.style.display = 'flex';
@@ -3140,11 +3104,6 @@ async function loginGoogle(){
 function showError(msg){
   const el = document.getElementById('loginError');
   if(el){ el.textContent = msg; el.style.display = 'block'; }
-}
-
-function hideError(){
-  const el = document.getElementById('loginError');
-  if(el){ el.textContent = ''; el.style.display = 'none'; }
 }
 
 async function logout(){
@@ -3210,7 +3169,7 @@ function saveData(){
 }
 
 // ── Inicializa ───────────────────────────────
-loadData(); renderNav(); setAIProvider(aiProvider); applyTheme(); handleAuthMessagesFromUrl();
+loadData(); renderNav(); setAIProvider(aiProvider); applyTheme();
 
 // App fica oculto até autenticação confirmar
 document.querySelector('.app-body').style.display = 'none';
@@ -3238,3 +3197,4 @@ initSupabase().then(ok => {
 </script>
 </body>
 </html>
+
