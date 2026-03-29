@@ -3,23 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <title>ConcursoPrep</title>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <style>
-    body { font-family: Arial; background:#0f172a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh;}
-    .card { background:#1e293b; padding:30px; border-radius:12px; text-align:center;}
-    button { padding:10px 20px; border:none; border-radius:8px; cursor:pointer;}
+    body {
+      font-family: Arial;
+      background:#0f172a;
+      color:#fff;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      height:100vh;
+    }
+    .card {
+      background:#1e293b;
+      padding:30px;
+      border-radius:12px;
+      text-align:center;
+    }
+    button {
+      padding:10px 20px;
+      border:none;
+      border-radius:8px;
+      cursor:pointer;
+    }
   </style>
 </head>
+
 <body>
 
 <div class="card">
   <h2>ConcursoPrep</h2>
   <p>Login com Google</p>
-  <button onclick="loginGoogle()">Entrar com Google</button>
+  <button id="btnLogin">Entrar com Google</button>
 </div>
 
 <script>
-let supabase = null;
+let supabase;
 let currentUser = null;
 
 async function initSupabase(){
@@ -29,11 +50,7 @@ async function initSupabase(){
 
     supabase = window.supabase.createClient(cfg.url, cfg.anonKey);
 
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if(session){
-      console.log("Usuário logado:", session.user);
-    }
+    console.log("Supabase OK");
 
   } catch(e){
     console.error("Erro init:", e);
@@ -41,27 +58,36 @@ async function initSupabase(){
 }
 
 async function loginGoogle(){
-  if(!supabase){
-    alert("Supabase não carregou");
-    return;
-  }
-
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: window.location.origin
+  try {
+    if(!supabase){
+      alert("Supabase não carregou");
+      return;
     }
-  });
 
-  if(error){
-    console.error(error);
-    alert("Erro login");
+    console.log("Iniciando login...");
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+
+    if(error){
+      console.error(error);
+      alert("Erro login");
+    }
+
+  } catch(e){
+    console.error(e);
   }
 }
+
+// conecta botão depois que página carrega
+document.getElementById("btnLogin").addEventListener("click", loginGoogle);
 
 initSupabase();
 </script>
 
 </body>
 </html>
-
