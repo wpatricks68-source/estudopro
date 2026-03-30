@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ConcursoPrep - Anki</title>
+  <title>ConcursoPrep - Anki + Claude</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body{margin:0;font-family:Arial,sans-serif;background:#07122b;color:#fff;}
@@ -11,6 +11,7 @@
     .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px;}
     .email{font-weight:700;}
     .btn{padding:10px 14px;border:none;border-radius:10px;cursor:pointer;background:#e5e7eb;color:#111827;}
+    .btn.small{padding:8px 10px;font-size:13px;}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
     .box{background:#1c2940;padding:20px;border-radius:14px;}
     .box h3{margin-top:0;}
@@ -41,6 +42,16 @@
     .stats{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;}
     .stat{background:#0f172a;padding:8px 10px;border-radius:10px;font-size:13px;}
     .empty{opacity:.8;font-size:14px;}
+    .claude-answer{
+      background:#0f172a;border-radius:12px;padding:14px;white-space:pre-wrap;line-height:1.6;
+      min-height:90px;
+    }
+    .spinner{
+      display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);
+      border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px;
+    }
+    .actions-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+    @keyframes spin{to{transform:rotate(360deg)}}
     @media (max-width: 900px){.grid{grid-template-columns:1fr;}}
   </style>
 </head>
@@ -50,7 +61,7 @@
 <script>
 let sb = null;
 let currentUser = null;
-let store = { temas: [], flashcards: [] };
+let store = { temas: [], flashcards: [], claudeHistory: [], questoes: [], resumos: [] };
 let reviewList = [];
 let reviewIndex = 0;
 let flipped = false;
@@ -120,14 +131,17 @@ async function loadApp(user){
   if(!data){
     await sb.from('user_data').insert({
       id:user.id,
-      data:{ temas: [], flashcards: [] }
+      data:{ temas: [], flashcards: [], claudeHistory: [], questoes: [], resumos: [] }
     });
-    data = { data: { temas: [], flashcards: [] } };
+    data = { data: { temas: [], flashcards: [], claudeHistory: [], questoes: [], resumos: [] } };
   }
 
   store = {
     temas: Array.isArray(data.data?.temas) ? data.data.temas : [],
-    flashcards: Array.isArray(data.data?.flashcards) ? data.data.flashcards : []
+    flashcards: Array.isArray(data.data?.flashcards) ? data.data.flashcards : [],
+    claudeHistory: Array.isArray(data.data?.claudeHistory) ? data.data.claudeHistory : [],
+    questoes: Array.isArray(data.data?.questoes) ? data.data.questoes : [],
+    resumos: Array.isArray(data.data?.resumos) ? data.data.resumos : []
   };
 
   prepareReview();
@@ -153,12 +167,29 @@ function renderDashboard(user){
   const dueCount = reviewList.length;
   const total = store.flashcards.length;
   const studied = store.flashcards.filter(fc => fc.lastReviewed === todayStr()).length;
+  const lastClaude = store.claudeHistory[0];
+  const lastResumo = store.resumos[0];
+  const totalQuestoes = store.questoes.length;
 
   document.getElementById('app').innerHTML = `
     <div class="dashboard">
       <div class="topbar">
         <div class="email">${escapeHtml(user.email)}</div>
         <button class="btn" id="btnLogout">Sair</button>
+      </div>
+
+      <div class="box" style="margin-bottom:16px;">
+        <h3>Pesquisa com Claude IA</h3>
+        <textarea id="claudePrompt" rows="4" placeholder="Ex: Explique o controle de constitucionalidade de forma simples e crie 3 exemplos práticos."></textarea>
+        <div class="actions-row">
+          <button class="btn" id="btnClaude">Pesquisar com Claude</button>
+          <button class="btn" id="btnResumo">Gerar resumo com Claude</button>
+          <button class="btn" id="btnFlashcardsClaude">Gerar flashcards com Claude</button>
+          <button class="btn" id="btnQuestoesClaude">Gerar questões com Claude</button>
+        </div>
+        <div style="margin-top:12px;">
+          <div class="claude-answer" id="claudeResult">${lastClaude ? escapeHtml(lastClaude.answer) : 'Faça uma pergunta para o Claude.'}</div>
+        </div>
       </div>
 
       <div class="grid">
@@ -179,8 +210,14 @@ function renderDashboard(user){
             <div class="stat">Total: <strong>${total}</strong></div>
             <div class="stat">Para revisar hoje: <strong>${dueCount}</strong></div>
             <div class="stat">Revisados hoje: <strong>${studied}</strong></div>
+            <div class="stat">Questões geradas: <strong>${totalQuestoes}</strong></div>
           </div>
         </div>
+      </div>
+
+      <div class="box" style="margin-top:16px;">
+        <h3>Último resumo gerado</h3>
+        <div class="claude-answer">${lastResumo ? escapeHtml(lastResumo.text) : 'Nenhum resumo gerado ainda.'}</div>
       </div>
 
       <div class="box" style="margin-top:16px;">
@@ -192,16 +229,26 @@ function renderDashboard(user){
         <h3>Lista de flashcards</h3>
         <div id="fcList"></div>
       </div>
+
+      <div class="box" style="margin-top:16px;">
+        <h3>Questões geradas com Claude</h3>
+        <div id="questoesList"></div>
+      </div>
     </div>
   `;
 
   document.getElementById('btnLogout').addEventListener('click', logout);
   document.getElementById('btnTema').addEventListener('click', addTema);
   document.getElementById('btnCard').addEventListener('click', addFlashcard);
+  document.getElementById('btnClaude').addEventListener('click', askClaude);
+  document.getElementById('btnResumo').addEventListener('click', gerarResumoClaude);
+  document.getElementById('btnFlashcardsClaude').addEventListener('click', gerarFlashcardsClaude);
+  document.getElementById('btnQuestoesClaude').addEventListener('click', gerarQuestoesClaude);
 
   renderTemas();
   renderReview();
   renderFlashcardList();
+  renderQuestoesList();
 }
 
 function renderTemas(){
@@ -350,6 +397,170 @@ function renderFlashcardList(){
       </div>
     </div>
   `).join('');
+}
+
+function renderQuestoesList(){
+  const el = document.getElementById('questoesList');
+  if(!el) return;
+
+  if(!store.questoes.length){
+    el.innerHTML = '<div class="empty">Nenhuma questão gerada ainda.</div>';
+    return;
+  }
+
+  el.innerHTML = store.questoes.map((q, i) => `
+    <div style="padding:12px;border-radius:10px;background:#0f172a;margin-bottom:10px;">
+      <div><strong>Questão ${i + 1}:</strong> ${escapeHtml(q.pergunta)}</div>
+      <div style="margin-top:6px;"><strong>Resposta:</strong> ${escapeHtml(q.resposta)}</div>
+    </div>
+  `).join('');
+}
+
+async function callClaude(systemPrompt, userPrompt){
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 1400,
+      system: systemPrompt,
+      messages: [
+        { role: 'user', content: userPrompt }
+      ]
+    })
+  });
+
+  const data = await response.json();
+  if(!response.ok){
+    throw new Error(data.error || 'Erro ao consultar o Claude');
+  }
+
+  return data.content?.[0]?.text || '';
+}
+
+async function askClaude(){
+  const promptEl = document.getElementById('claudePrompt');
+  const resultEl = document.getElementById('claudeResult');
+  const prompt = promptEl.value.trim();
+  if(!prompt) return;
+
+  resultEl.innerHTML = '<span class="spinner"></span>Pesquisando com Claude...';
+
+  try{
+    const answer = await callClaude(
+      'Você é um professor especialista em estudos para concursos. Responda em português do Brasil, de forma clara, objetiva e didática.',
+      prompt
+    );
+
+    resultEl.textContent = answer;
+
+    store.claudeHistory.unshift({
+      id: crypto.randomUUID(),
+      prompt,
+      answer,
+      createdAt: new Date().toISOString()
+    });
+    store.claudeHistory = store.claudeHistory.slice(0, 10);
+    await saveStore();
+  }catch(err){
+    resultEl.textContent = 'Erro: ' + err.message;
+  }
+}
+
+async function gerarResumoClaude(){
+  const prompt = document.getElementById('claudePrompt').value.trim();
+  const resultEl = document.getElementById('claudeResult');
+  if(!prompt) return;
+
+  resultEl.innerHTML = '<span class="spinner"></span>Gerando resumo...';
+
+  try{
+    const text = await callClaude(
+      'Você é um professor especialista em concursos. Gere um resumo didático, claro, organizado em tópicos e em português do Brasil.',
+      prompt
+    );
+
+    resultEl.textContent = text;
+    store.resumos.unshift({
+      id: crypto.randomUUID(),
+      prompt,
+      text,
+      createdAt: new Date().toISOString()
+    });
+    store.resumos = store.resumos.slice(0, 10);
+    await saveStore();
+    renderDashboard(currentUser);
+  }catch(err){
+    resultEl.textContent = 'Erro: ' + err.message;
+  }
+}
+
+function extractJsonArray(text){
+  const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  const first = clean.indexOf('[');
+  const last = clean.lastIndexOf(']');
+  if(first === -1 || last === -1) throw new Error('JSON não encontrado');
+  return JSON.parse(clean.slice(first, last + 1));
+}
+
+async function gerarFlashcardsClaude(){
+  const prompt = document.getElementById('claudePrompt').value.trim();
+  const resultEl = document.getElementById('claudeResult');
+  if(!prompt) return;
+
+  resultEl.innerHTML = '<span class="spinner"></span>Gerando flashcards...';
+
+  try{
+    const text = await callClaude(
+      'Crie 5 flashcards em português do Brasil. Responda somente em JSON array no formato [{"tema":"...","front":"...","back":"..."}].',
+      prompt
+    );
+
+    const arr = extractJsonArray(text);
+    arr.forEach(item => {
+      if(item.front && item.back){
+        store.flashcards.push(createFlashcard(item.front, item.back, item.tema || 'Claude'));
+      }
+    });
+
+    await saveStore();
+    prepareReview();
+    renderDashboard(currentUser);
+  }catch(err){
+    resultEl.textContent = 'Erro: ' + err.message;
+  }
+}
+
+async function gerarQuestoesClaude(){
+  const prompt = document.getElementById('claudePrompt').value.trim();
+  const resultEl = document.getElementById('claudeResult');
+  if(!prompt) return;
+
+  resultEl.innerHTML = '<span class="spinner"></span>Gerando questões...';
+
+  try{
+    const text = await callClaude(
+      'Crie 5 questões curtas em português do Brasil. Responda somente em JSON array no formato [{"pergunta":"...","resposta":"..."}].',
+      prompt
+    );
+
+    const arr = extractJsonArray(text);
+    arr.forEach(item => {
+      if(item.pergunta && item.resposta){
+        store.questoes.push({
+          id: crypto.randomUUID(),
+          pergunta: item.pergunta,
+          resposta: item.resposta,
+          createdAt: new Date().toISOString()
+        });
+      }
+    });
+
+    await saveStore();
+    renderDashboard(currentUser);
+  }catch(err){
+    resultEl.textContent = 'Erro: ' + err.message;
+  }
 }
 
 async function logout(){
