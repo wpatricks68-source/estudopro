@@ -3,125 +3,353 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ConcursoPrep</title>
+  <title>ConcursoPrep - Anki</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    body{margin:0;font-family:Arial;background:#07122b;color:#fff;}
-    .center{display:flex;align-items:center;justify-content:center;height:100vh;}
-    .card{background:#1c2940;padding:30px;border-radius:12px;text-align:center;width:320px;}
-    button{padding:10px;border:none;border-radius:8px;cursor:pointer;width:100%;margin-top:10px;}
-    .dashboard{padding:20px;}
-    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
-    .box{background:#1c2940;padding:20px;border-radius:10px;margin-bottom:10px;}
+    body{margin:0;font-family:Arial,sans-serif;background:#07122b;color:#fff;}
+    .dashboard{padding:20px;max-width:1100px;margin:0 auto;}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px;}
+    .email{font-weight:700;}
+    .btn{padding:10px 14px;border:none;border-radius:10px;cursor:pointer;background:#e5e7eb;color:#111827;}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+    .box{background:#1c2940;padding:20px;border-radius:14px;}
+    .box h3{margin-top:0;}
+    input, textarea{
+      width:100%;padding:10px;border-radius:8px;border:none;box-sizing:border-box;
+      margin-bottom:10px;
+    }
+    ul{padding-left:18px;}
+    li{margin-bottom:6px;}
+    .fc-wrap{perspective:1000px;max-width:500px;margin:18px auto 8px;}
+    .fc{position:relative;height:250px;transform-style:preserve-3d;transition:transform .5s;cursor:pointer;}
+    .fc.flipped{transform:rotateY(180deg);}
+    .face{
+      position:absolute;inset:0;backface-visibility:hidden;border-radius:16px;
+      display:flex;align-items:center;justify-content:center;text-align:center;
+      padding:24px;font-size:22px;line-height:1.5;
+      box-shadow:0 10px 25px rgba(0,0,0,.25);
+    }
+    .front{background:#243653;color:#fff;}
+    .back{background:#e5e7eb;color:#111827;transform:rotateY(180deg);}
+    .muted{color:#cbd5e1;font-size:14px;}
+    .review-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:16px;}
+    .review-actions .btn{min-width:120px;}
+    .easy{background:#86efac;}
+    .hard{background:#fdba74;}
+    .again{background:#fca5a5;}
+    .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:12px;margin-right:6px;}
+    .stats{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;}
+    .stat{background:#0f172a;padding:8px 10px;border-radius:10px;font-size:13px;}
+    .empty{opacity:.8;font-size:14px;}
+    @media (max-width: 900px){.grid{grid-template-columns:1fr;}}
   </style>
 </head>
 <body>
-
 <div id="app"></div>
 
 <script>
-let sb;
+let sb = null;
+let currentUser = null;
+let store = { temas: [], flashcards: [] };
+let reviewList = [];
+let reviewIndex = 0;
+let flipped = false;
+
+function todayStr(){
+  return new Date().toISOString().slice(0,10);
+}
+
+function escapeHtml(v){
+  return String(v ?? '')
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#39;");
+}
 
 async function init(){
-  const res = await fetch('/api/supabase-config');
+  const res = await fetch('/api/supabase-config', { cache: 'no-store' });
   const cfg = await res.json();
   sb = window.supabase.createClient(cfg.url, cfg.anonKey);
 
-  sb.auth.onAuthStateChange((e,s)=>{
-    if(s) loadApp(s);
-    else showLogin();
+  sb.auth.onAuthStateChange((event, session) => {
+    if(session){
+      currentUser = session.user;
+      loadApp(session.user);
+    }else{
+      currentUser = null;
+      showLogin();
+    }
   });
 
-  const {data:{session}} = await sb.auth.getSession();
-  if(session) loadApp(session);
-  else showLogin();
+  const sessionResponse = await sb.auth.getSession();
+  const session = sessionResponse?.data?.session;
+  if(session){
+    currentUser = session.user;
+    loadApp(session.user);
+  }else{
+    showLogin();
+  }
 }
 
 function showLogin(){
   document.getElementById('app').innerHTML = `
-    <div class="center">
-      <div class="card">
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;">
+      <div class="box" style="width:340px;text-align:center;">
         <h2>ConcursoPrep</h2>
-        <p>Login com Google</p>
-        <button onclick="login()">Entrar com Google</button>
+        <p class="muted">Login com Google</p>
+        <button class="btn" id="btnLogin">Entrar com Google</button>
       </div>
     </div>
   `;
+  document.getElementById('btnLogin').addEventListener('click', login);
 }
 
 async function login(){
   await sb.auth.signInWithOAuth({
     provider:'google',
-    options:{redirectTo:window.location.origin}
+    options:{ redirectTo: window.location.origin }
   });
 }
 
-async function loadApp(session){
-  const user = session.user;
-
-  // carregar dados do usuário
-  let {data, error} = await sb
-    .from('user_data')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+async function loadApp(user){
+  let response = await sb.from('user_data').select('*').eq('id', user.id).single();
+  let data = response.data;
 
   if(!data){
     await sb.from('user_data').insert({
       id:user.id,
-      data:{temas:[],flashcards:[]}
+      data:{ temas: [], flashcards: [] }
     });
-    data = {data:{temas:[],flashcards:[]}};
+    data = { data: { temas: [], flashcards: [] } };
   }
 
-  renderDashboard(user, data.data);
+  store = {
+    temas: Array.isArray(data.data?.temas) ? data.data.temas : [],
+    flashcards: Array.isArray(data.data?.flashcards) ? data.data.flashcards : []
+  };
+
+  prepareReview();
+  renderDashboard(user);
 }
 
-function renderDashboard(user, userData){
+async function saveStore(){
+  if(!currentUser) return;
+  await sb.from('user_data').update({
+    data: store,
+    updated_at: new Date().toISOString()
+  }).eq('id', currentUser.id);
+}
+
+function prepareReview(){
+  const today = todayStr();
+  reviewList = store.flashcards.filter(fc => !fc.nextReview || fc.nextReview <= today);
+  reviewIndex = 0;
+  flipped = false;
+}
+
+function renderDashboard(user){
+  const dueCount = reviewList.length;
+  const total = store.flashcards.length;
+  const studied = store.flashcards.filter(fc => fc.lastReviewed === todayStr()).length;
+
   document.getElementById('app').innerHTML = `
     <div class="dashboard">
       <div class="topbar">
-        <div>
-          <strong>${user.email}</strong>
-        </div>
-        <button onclick="logout()">Sair</button>
+        <div class="email">${escapeHtml(user.email)}</div>
+        <button class="btn" id="btnLogout">Sair</button>
       </div>
 
-      <div class="box">
-        <h3>Temas</h3>
-        <input id="temaInput" placeholder="Novo tema"/>
-        <button onclick="addTema()">Adicionar</button>
-        <ul id="listaTemas"></ul>
+      <div class="grid">
+        <div class="box">
+          <h3>Temas</h3>
+          <input id="temaInput" placeholder="Novo tema" />
+          <button class="btn" id="btnTema">Adicionar tema</button>
+          <ul id="listaTemas"></ul>
+        </div>
+
+        <div class="box">
+          <h3>Novo flashcard estilo Anki</h3>
+          <input id="fcTema" placeholder="Tema (ex: Constitucional)" />
+          <textarea id="fcFrente" rows="3" placeholder="Frente do cartão (pergunta)"></textarea>
+          <textarea id="fcVerso" rows="4" placeholder="Verso do cartão (resposta)"></textarea>
+          <button class="btn" id="btnCard">Salvar flashcard</button>
+          <div class="stats">
+            <div class="stat">Total: <strong>${total}</strong></div>
+            <div class="stat">Para revisar hoje: <strong>${dueCount}</strong></div>
+            <div class="stat">Revisados hoje: <strong>${studied}</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="box" style="margin-top:16px;">
+        <h3>Revisão estilo Anki</h3>
+        <div id="reviewArea"></div>
+      </div>
+
+      <div class="box" style="margin-top:16px;">
+        <h3>Lista de flashcards</h3>
+        <div id="fcList"></div>
       </div>
     </div>
   `;
 
-  window.userData = userData;
+  document.getElementById('btnLogout').addEventListener('click', logout);
+  document.getElementById('btnTema').addEventListener('click', addTema);
+  document.getElementById('btnCard').addEventListener('click', addFlashcard);
+
   renderTemas();
+  renderReview();
+  renderFlashcardList();
 }
 
 function renderTemas(){
   const ul = document.getElementById('listaTemas');
-  ul.innerHTML = '';
-  userData.temas.forEach(t=>{
-    ul.innerHTML += `<li>${t}</li>`;
-  });
+  if(!ul) return;
+  ul.innerHTML = store.temas.length
+    ? store.temas.map(t => `<li>${escapeHtml(t)}</li>`).join('')
+    : '<div class="empty">Nenhum tema ainda.</div>';
 }
 
 async function addTema(){
   const input = document.getElementById('temaInput');
   const val = input.value.trim();
   if(!val) return;
-
-  userData.temas.push(val);
-  input.value='';
+  store.temas.push(val);
+  input.value = '';
   renderTemas();
+  await saveStore();
+}
 
-  const {data:{session}} = await sb.auth.getSession();
+function createFlashcard(front, back, tema){
+  return {
+    id: crypto.randomUUID(),
+    tema: tema || '',
+    front,
+    back,
+    interval: 0,
+    repetitions: 0,
+    nextReview: todayStr(),
+    lastReviewed: null,
+    history: []
+  };
+}
 
-  await sb.from('user_data').update({
-    data:userData
-  }).eq('id', session.user.id);
+async function addFlashcard(){
+  const tema = document.getElementById('fcTema').value.trim();
+  const front = document.getElementById('fcFrente').value.trim();
+  const back = document.getElementById('fcVerso').value.trim();
+  if(!front || !back) return;
+
+  store.flashcards.push(createFlashcard(front, back, tema));
+  document.getElementById('fcTema').value = '';
+  document.getElementById('fcFrente').value = '';
+  document.getElementById('fcVerso').value = '';
+
+  prepareReview();
+  renderDashboard(currentUser);
+  await saveStore();
+}
+
+function currentReviewCard(){
+  return reviewList[reviewIndex] || null;
+}
+
+function renderReview(){
+  const area = document.getElementById('reviewArea');
+  if(!area) return;
+
+  const card = currentReviewCard();
+  if(!card){
+    area.innerHTML = `<div class="empty">Nenhum flashcard para revisar hoje.</div>`;
+    return;
+  }
+
+  area.innerHTML = `
+    <div style="text-align:center;">
+      ${card.tema ? `<span class="tag">${escapeHtml(card.tema)}</span>` : ''}
+      <div class="muted" style="margin-top:8px;">Cartão ${reviewIndex + 1} de ${reviewList.length}</div>
+      <div class="fc-wrap">
+        <div class="fc ${flipped ? 'flipped' : ''}" id="ankiCard">
+          <div class="face front">${escapeHtml(card.front)}</div>
+          <div class="face back">${escapeHtml(card.back)}</div>
+        </div>
+      </div>
+      <div class="muted">Clique no cartão para virar</div>
+      <div class="review-actions" style="${flipped ? '' : 'display:none;'}">
+        <button class="btn again" data-grade="again">De novo</button>
+        <button class="btn hard" data-grade="hard">Difícil</button>
+        <button class="btn easy" data-grade="easy">Fácil</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('ankiCard').addEventListener('click', () => {
+    flipped = !flipped;
+    renderReview();
+  });
+
+  area.querySelectorAll('[data-grade]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await reviewCard(btn.dataset.grade);
+    });
+  });
+}
+
+function calcNext(card, grade){
+  if(grade === 'again'){
+    card.interval = 1;
+    card.repetitions = 0;
+  } else if(grade === 'hard'){
+    card.repetitions = (card.repetitions || 0) + 1;
+    card.interval = Math.max(2, (card.interval || 1) + 2);
+  } else if(grade === 'easy'){
+    card.repetitions = (card.repetitions || 0) + 1;
+    card.interval = card.interval <= 0 ? 4 : Math.round(card.interval * 2.2);
+  }
+
+  const next = new Date();
+  next.setDate(next.getDate() + card.interval);
+  card.nextReview = next.toISOString().slice(0,10);
+  card.lastReviewed = todayStr();
+  if(!Array.isArray(card.history)) card.history = [];
+  card.history.push({ date: todayStr(), grade, interval: card.interval });
+}
+
+async function reviewCard(grade){
+  const due = currentReviewCard();
+  if(!due) return;
+
+  const real = store.flashcards.find(fc => fc.id === due.id);
+  if(!real) return;
+
+  calcNext(real, grade);
+  await saveStore();
+
+  prepareReview();
+  renderDashboard(currentUser);
+}
+
+function renderFlashcardList(){
+  const el = document.getElementById('fcList');
+  if(!el) return;
+
+  if(!store.flashcards.length){
+    el.innerHTML = '<div class="empty">Nenhum flashcard criado ainda.</div>';
+    return;
+  }
+
+  el.innerHTML = store.flashcards.map(fc => `
+    <div style="padding:12px;border-radius:10px;background:#0f172a;margin-bottom:10px;">
+      <div>${fc.tema ? `<span class="tag">${escapeHtml(fc.tema)}</span>` : ''}</div>
+      <div><strong>Frente:</strong> ${escapeHtml(fc.front)}</div>
+      <div style="margin-top:6px;"><strong>Verso:</strong> ${escapeHtml(fc.back)}</div>
+      <div class="muted" style="margin-top:8px;">
+        Próxima revisão: ${escapeHtml(fc.nextReview || '-')} · Repetições: ${Number(fc.repetitions || 0)}
+      </div>
+    </div>
+  `).join('');
 }
 
 async function logout(){
@@ -131,7 +359,6 @@ async function logout(){
 
 init();
 </script>
-
 </body>
 </html>
 
