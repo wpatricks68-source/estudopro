@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ConcursoPrep - Painel de Estudo + Questões + Arquivos</title>
+  <title>ConcursoPrep - Resumo por Arquivos Selecionados</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; }
@@ -41,14 +40,15 @@
     .login-card{max-width:420px;width:100%;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid #202c45;border-radius:24px;padding:24px;text-align:center}
     .small{font-size:12px;color:var(--muted)}
     .badge{display:inline-block;padding:5px 8px;border-radius:999px;font-size:11px;background:#14203a;color:#9ec5ff;border:1px solid #27416a}
-    .question-card,.list-item,.file-item{background:#0b1220;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:8px}
+    .question-card,.file-item{background:#0b1220;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:8px}
     .alternatives label{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-top:8px;cursor:pointer}
     .alt-correct{border-color:#10b981 !important;background:rgba(16,185,129,.12)}
     .divider{height:1px;background:#24314d;margin:14px 0}
-    .hidden{display:none !important}
     .file-item{display:flex;align-items:center;justify-content:space-between;gap:10px}
     .file-left{display:flex;align-items:center;gap:10px;min-width:0}
     .file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .loader{display:inline-block;width:14px;height:14px;border:2px solid #6b7280;border-top-color:#fff;border-radius:999px;animation:spin .9s linear infinite;vertical-align:middle;margin-right:6px}
+    @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width:980px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.grid.two{grid-template-columns:1fr}}
   </style>
 </head>
@@ -56,76 +56,39 @@
 <div id="root"></div>
 
 <script>
-let sb = null;
-let sessionUser = null;
-let panels = [];
-let activePanelId = null;
-let questions = [];
-let files = [];
-let activeQuestionIndex = 0;
-let showGabarito = false;
-let highlightCorrect = false;
-let saveTimer = null;
-
+let sb = null, sessionUser = null, panels = [], activePanelId = null, questions = [], files = [];
+let activeQuestionIndex = 0, showGabarito = false, highlightCorrect = false, saveTimer = null, summaryLoading = false;
 function esc(s){ return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
 function getActivePanel(){ return panels.find(p => p.id === activePanelId) || null; }
+function selectedFiles(){ return files.filter(f => f.is_selected_for_ai); }
 
 async function initApp(){
-  const root = document.getElementById('root');
   try{
     const res = await fetch('/api/supabase-config', { cache:'no-store' });
     if(!res.ok) throw new Error('Falha ao carregar /api/supabase-config');
     const cfg = await res.json();
     if(!cfg.url || !cfg.anonKey) throw new Error('SUPABASE_URL ou SUPABASE_ANON_KEY ausentes');
     sb = window.supabase.createClient(cfg.url, cfg.anonKey);
-
     sb.auth.onAuthStateChange(async (_event, session) => {
       if(session && session.user){
         sessionUser = session.user;
-        await loadPanels();
-        await loadQuestions();
-        await loadFiles();
-        renderApp();
-      } else {
-        sessionUser = null;
-        renderLogin();
-      }
+        await loadPanels(); await loadQuestions(); await loadFiles(); renderApp();
+      } else { sessionUser = null; renderLogin(); }
     });
-
     const sessionResponse = await sb.auth.getSession();
     const session = sessionResponse && sessionResponse.data ? sessionResponse.data.session : null;
-    if(session && session.user){
-      sessionUser = session.user;
-      await loadPanels();
-      await loadQuestions();
-      await loadFiles();
-      renderApp();
-    } else {
-      renderLogin();
-    }
+    if(session && session.user){ sessionUser = session.user; await loadPanels(); await loadQuestions(); await loadFiles(); renderApp(); }
+    else renderLogin();
   }catch(err){
-    root.innerHTML = `<div class="login-wrap"><div class="login-card"><h2>Erro ao iniciar</h2><p class="sub">${esc(err.message)}</p></div></div>`;
+    document.getElementById('root').innerHTML = `<div class="login-wrap"><div class="login-card"><h2>Erro ao iniciar</h2><p class="sub">${esc(err.message)}</p></div></div>`;
   }
 }
-
 function renderLogin(){
-  document.getElementById('root').innerHTML = `
-    <div class="login-wrap">
-      <div class="login-card">
-        <div class="brand">Concurso<span>Prep</span></div>
-        <h2>Painel de Estudo</h2>
-        <p class="sub">Entre com Google para carregar e salvar suas abas, questões e arquivos no Supabase.</p>
-        <button class="btn primary" id="loginBtn">Entrar com Google</button>
-      </div>
-    </div>`;
+  document.getElementById('root').innerHTML = `<div class="login-wrap"><div class="login-card"><div class="brand">Concurso<span>Prep</span></div><h2>Painel de Estudo</h2><p class="sub">Entre com Google para carregar e salvar suas abas, questões e arquivos no Supabase.</p><button class="btn primary" id="loginBtn">Entrar com Google</button></div></div>`;
   document.getElementById('loginBtn').onclick = loginGoogle;
 }
-
 async function loginGoogle(){
-  const response = await sb.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.origin }
-  });
+  const response = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
   if(response && response.error) alert(response.error.message);
 }
 async function logout(){ await sb.auth.signOut(); }
@@ -140,149 +103,126 @@ async function loadPanels(){
   }
   activePanelId = panels.length ? panels[0].id : null;
 }
-
 async function createPanelInDb(title, topic, content_html){
-  const response = await sb.from('study_panels').insert({
-    user_id: sessionUser.id, title, topic: topic || '', content_html: content_html || ''
-  }).select().single();
+  const response = await sb.from('study_panels').insert({ user_id: sessionUser.id, title, topic: topic || '', content_html: content_html || '' }).select().single();
   if(response.error){ alert('Erro ao criar painel: ' + response.error.message); return null; }
   return response.data;
 }
-
 async function updatePanelInDb(panel){
-  const response = await sb.from('study_panels').update({
-    title: panel.title, topic: panel.topic, content_html: panel.content_html, updated_at: new Date().toISOString()
-  }).eq('id', panel.id).eq('user_id', sessionUser.id);
+  const response = await sb.from('study_panels').update({ title: panel.title, topic: panel.topic, content_html: panel.content_html, updated_at: new Date().toISOString() }).eq('id', panel.id).eq('user_id', sessionUser.id);
   return !response.error;
 }
-
 function scheduleSave(panel){
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async function(){
+  saveTimer = setTimeout(async () => {
     const ok = await updatePanelInDb(panel);
     const statusEl = document.getElementById('saveStatus');
     if(statusEl) statusEl.textContent = ok ? 'Painel salvo no Supabase.' : 'Erro ao salvar painel.';
   }, 700);
 }
-
 async function loadQuestions(){
   const panel = getActivePanel();
   questions = []; activeQuestionIndex = 0; showGabarito = false; highlightCorrect = false;
   if(!panel) return;
-  const response = await sb.from('study_questions')
-    .select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
+  const response = await sb.from('study_questions').select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
   if(response.error){ alert('Erro ao carregar questões: ' + response.error.message); return; }
   questions = response.data || [];
 }
-
 async function loadFiles(){
   const panel = getActivePanel();
   files = [];
   if(!panel) return;
-  const response = await sb.from('study_files')
-    .select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
+  const response = await sb.from('study_files').select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
   if(response.error){ alert('Erro ao carregar arquivos: ' + response.error.message); return; }
   files = response.data || [];
 }
-
 async function createQuestionManual(){
-  const panel = getActivePanel();
-  if(!panel) return;
+  const panel = getActivePanel(); if(!panel) return;
   const question_type = (prompt('Digite "ce" para certo/errado ou "mc" para múltipla escolha:', 'ce') || 'ce').trim().toLowerCase();
-  const promptText = window.prompt('Digite o enunciado da questão:');
-  if(!promptText) return;
-
-  let options = [];
-  let correct_answer = '';
+  const promptText = window.prompt('Digite o enunciado da questão:'); if(!promptText) return;
+  let options = [], correct_answer = '';
   if(question_type === 'mc'){
-    const a = window.prompt('Alternativa A:') || '';
-    const b = window.prompt('Alternativa B:') || '';
-    const c = window.prompt('Alternativa C:') || '';
-    const d = window.prompt('Alternativa D:') || '';
-    options = [a,b,c,d];
+    options = [window.prompt('Alternativa A:') || '', window.prompt('Alternativa B:') || '', window.prompt('Alternativa C:') || '', window.prompt('Alternativa D:') || ''];
     correct_answer = window.prompt('Digite a correta: A, B, C ou D', 'A') || 'A';
   } else {
-    options = ['Certo', 'Errado'];
-    correct_answer = window.prompt('Digite a correta: Certo ou Errado', 'Certo') || 'Certo';
+    options = ['Certo', 'Errado']; correct_answer = window.prompt('Digite a correta: Certo ou Errado', 'Certo') || 'Certo';
   }
-
   const response = await sb.from('study_questions').insert({
-    user_id: sessionUser.id,
-    study_panel_id: panel.id,
-    question_type: question_type === 'mc' ? 'mc' : 'ce',
-    prompt: promptText,
-    options_json: options,
-    correct_answer,
-    created_by: 'manual',
-    difficulty: 'medio'
+    user_id: sessionUser.id, study_panel_id: panel.id, question_type: question_type === 'mc' ? 'mc' : 'ce',
+    prompt: promptText, options_json: options, correct_answer, created_by: 'manual', difficulty: 'medio'
   });
-
   if(response.error){ alert('Erro ao criar questão: ' + response.error.message); return; }
-  await loadQuestions();
-  activeQuestionIndex = questions.length ? questions.length - 1 : 0;
-  renderApp();
+  await loadQuestions(); activeQuestionIndex = questions.length ? questions.length - 1 : 0; renderApp();
 }
-
 async function generateQuestionAI(){
-  const panel = getActivePanel();
-  if(!panel) return;
+  const panel = getActivePanel(); if(!panel) return;
   const topic = panel.topic || 'tema informado';
   const response = await sb.from('study_questions').insert({
-    user_id: sessionUser.id,
-    study_panel_id: panel.id,
-    question_type: 'mc',
-    prompt: 'Questão gerada sobre ' + topic,
-    options_json: ['Alternativa A', 'Alternativa correta', 'Alternativa C', 'Alternativa D'],
-    correct_answer: 'B',
-    created_by: 'ai',
-    difficulty: 'medio'
+    user_id: sessionUser.id, study_panel_id: panel.id, question_type: 'mc',
+    prompt: 'Questão gerada sobre ' + topic, options_json: ['Alternativa A', 'Alternativa correta', 'Alternativa C', 'Alternativa D'],
+    correct_answer: 'B', created_by: 'ai', difficulty: 'medio'
   });
   if(response.error){ alert('Erro ao gerar questão: ' + response.error.message); return; }
-  await loadQuestions();
-  activeQuestionIndex = questions.length ? questions.length - 1 : 0;
-  renderApp();
+  await loadQuestions(); activeQuestionIndex = questions.length ? questions.length - 1 : 0; renderApp();
 }
-
 async function addFakeFile(){
-  const panel = getActivePanel();
-  if(!panel) return;
-  const fileName = prompt('Nome do arquivo para registrar:', 'Aula 01 - Constitucional.pdf');
-  if(!fileName) return;
+  const panel = getActivePanel(); if(!panel) return;
+  const fileName = prompt('Nome do arquivo para registrar:', 'Aula 01 - Constitucional.pdf'); if(!fileName) return;
   const response = await sb.from('study_files').insert({
-    user_id: sessionUser.id,
-    study_panel_id: panel.id,
-    file_name: fileName,
-    file_type: fileName.split('.').pop() || 'txt',
-    file_url: '',
-    is_selected_for_ai: false
+    user_id: sessionUser.id, study_panel_id: panel.id, file_name: fileName,
+    file_type: fileName.split('.').pop() || 'txt', file_url: '', is_selected_for_ai: false
   });
   if(response.error){ alert('Erro ao salvar arquivo: ' + response.error.message); return; }
-  await loadFiles();
-  renderApp();
+  await loadFiles(); renderApp();
 }
-
 async function toggleFileSelected(fileId, checked){
-  const response = await sb.from('study_files')
-    .update({ is_selected_for_ai: checked })
-    .eq('id', fileId)
-    .eq('user_id', sessionUser.id);
+  const response = await sb.from('study_files').update({ is_selected_for_ai: checked }).eq('id', fileId).eq('user_id', sessionUser.id);
   if(response.error){ alert('Erro ao atualizar arquivo: ' + response.error.message); return; }
-  await loadFiles();
-  renderApp();
+  await loadFiles(); renderApp();
 }
-
+async function generateSummaryFromSelectedFiles(){
+  const panel = getActivePanel(); if(!panel) return;
+  const selected = selectedFiles();
+  if(!selected.length){ alert('Marque pelo menos um arquivo como base ativa.'); return; }
+  const editor = document.getElementById('panelEditor');
+  const statusEl = document.getElementById('saveStatus');
+  summaryLoading = true;
+  if(statusEl) statusEl.innerHTML = '<span class="loader"></span>Gerando resumo com arquivos selecionados...';
+  try{
+    const payload = {
+      mode: 'summary_from_files',
+      topic: panel.topic || '',
+      panelTitle: panel.title || '',
+      files: selected.map(f => ({ id: f.id, file_name: f.file_name, file_type: f.file_type, file_url: f.file_url, is_selected_for_ai: f.is_selected_for_ai }))
+    };
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if(!response.ok) throw new Error('Falha ao chamar /api/chat');
+    const data = await response.json();
+    const summary = data.summary || data.text || data.response || '';
+    if(!summary) throw new Error('A API não retornou um resumo.');
+    panel.content_html = '<h3>Resumo gerado com arquivos selecionados</h3><p>' + esc(summary).replace(/\n/g, '</p><p>') + '</p>';
+    editor.innerHTML = panel.content_html;
+    const ok = await updatePanelInDb(panel);
+    if(statusEl) statusEl.textContent = ok ? 'Resumo gerado e salvo no Supabase.' : 'Resumo gerado, mas houve erro ao salvar.';
+  }catch(err){
+    if(statusEl) statusEl.textContent = 'Erro ao gerar resumo.';
+    alert('Resumo via IA depende da rota /api/chat responder com summary, text ou response. Erro: ' + err.message);
+  }finally{
+    summaryLoading = false;
+  }
+}
 function currentQuestion(){ return questions[activeQuestionIndex] || null; }
 function correctIndex(q){
   if(!q) return -1;
   if(q.question_type === 'ce') return String(q.correct_answer).toLowerCase().includes('certo') ? 0 : 1;
-  const map = {A:0,B:1,C:2,D:3};
-  return map[String(q.correct_answer).toUpperCase()] ?? -1;
+  const map = {A:0,B:1,C:2,D:3}; return map[String(q.correct_answer).toUpperCase()] ?? -1;
 }
-
 function renderApp(){
-  const active = getActivePanel();
-  const q = currentQuestion();
-
+  const active = getActivePanel(), q = currentQuestion(), selectedCount = selectedFiles().length;
   document.getElementById('root').innerHTML = `
     <div class="app">
       <aside class="sidebar">
@@ -294,23 +234,14 @@ function renderApp(){
           <button class="btn" id="logoutBtn">Sair</button>
         </div>
       </aside>
-
       <main class="main">
         <div class="hero">
-          <div>
-            <h1>Painel de Estudo</h1>
-            <p class="sub">Agora com questões e arquivos-base integrados ao Supabase, vinculados à aba atual.</p>
-          </div>
-          <div class="top-actions">
-            <button class="btn primary" id="newPanelTop">Nova aba</button>
-            <button class="btn" id="saveNow">Salvar agora</button>
-          </div>
+          <div><h1>Painel de Estudo</h1><p class="sub">Agora com questões e arquivos-base integrados ao Supabase. Você também pode pedir resumo usando apenas os arquivos marcados.</p></div>
+          <div class="top-actions"><button class="btn primary" id="newPanelTop">Nova aba</button><button class="btn" id="saveNow">Salvar agora</button></div>
         </div>
-
         <div class="tabs">
-          ${panels.map(function(p){ return '<button class="tab ' + (p.id===activePanelId?'active':'') + '" data-panel="' + p.id + '">' + esc(p.title) + '</button>'; }).join('')}
+          ${panels.map(p => '<button class="tab ' + (p.id===activePanelId?'active':'') + '" data-panel="' + p.id + '">' + esc(p.title) + '</button>').join('')}
         </div>
-
         <div class="grid two">
           <div class="card">
             <h2>Dados da aba</h2>
@@ -330,21 +261,16 @@ function renderApp(){
               <div id="panelEditor" class="editor" contenteditable="true">${active.content_html || ''}</div>
             ` : `<div class="status">Nenhuma aba selecionada.</div>`}
           </div>
-
           <div class="card">
             <h2>Status</h2>
             <div class="status" id="saveStatus">Pronto.</div>
-            <div style="margin-top:16px;">
-              <h3>Resumo da aba</h3>
-              <div class="status">${questions.length} questão(ões) · ${files.length} arquivo(s)</div>
-            </div>
-
+            <div style="margin-top:16px;"><h3>Resumo da aba</h3><div class="status">${questions.length} questão(ões) · ${files.length} arquivo(s) · ${selectedCount} selecionado(s)</div></div>
             <div class="divider"></div>
-
             <h3>Base de arquivos para IA</h3>
-            <div class="sub">Registre arquivos e marque quais devem ser usados como base.</div>
+            <div class="sub">Marque os arquivos que devem ser usados no resumo.</div>
             <div class="actions-row">
               <button class="btn small primary" id="addFakeFileBtn">Adicionar arquivo</button>
+              <button class="btn small" id="summaryFromFilesBtn">${summaryLoading ? 'Gerando...' : 'Gerar resumo usando arquivos selecionados'}</button>
             </div>
             <div id="fileList">
               ${files.length ? files.map(f => `
@@ -359,131 +285,73 @@ function renderApp(){
             </div>
           </div>
         </div>
-
         <div class="card" style="margin-top:18px;">
           <div class="hero" style="margin-bottom:12px;">
-            <div>
-              <h2>Painel de Questões</h2>
-              <p class="sub">Crie questões manuais, gere questões por IA e navegue entre as questões da aba atual.</p>
-            </div>
-            <div class="top-actions">
-              <button class="btn" id="newQuestionBtn">Nova questão</button>
-              <button class="btn primary" id="genQuestionBtn">Gerar com IA</button>
-            </div>
+            <div><h2>Painel de Questões</h2><p class="sub">Crie questões manuais, gere questões por IA e navegue entre as questões da aba atual.</p></div>
+            <div class="top-actions"><button class="btn" id="newQuestionBtn">Nova questão</button><button class="btn primary" id="genQuestionBtn">Gerar com IA</button></div>
           </div>
-
           ${q ? `
             <div class="question-card">
               <strong>Questão ${activeQuestionIndex + 1} de ${questions.length}</strong>
               <p style="margin-top:10px;">${esc(q.prompt)}</p>
               <div class="alternatives">
-                ${(q.options_json || []).map((opt, i) => `
-                  <label class="${highlightCorrect && i === correctIndex(q) ? 'alt-correct' : ''}">
-                    <input type="radio" name="qactive"> ${String.fromCharCode(65+i)}) ${esc(opt)}
-                  </label>
-                `).join('')}
+                ${(q.options_json || []).map((opt, i) => `<label class="${highlightCorrect && i === correctIndex(q) ? 'alt-correct' : ''}"><input type="radio" name="qactive"> ${String.fromCharCode(65+i)}) ${esc(opt)}</label>`).join('')}
               </div>
               ${showGabarito ? `<p class="sub" style="margin-top:12px;">Gabarito: ${esc(q.correct_answer)}</p>` : ''}
             </div>
-
             <div class="inline-row" style="margin-top:12px;justify-content:space-between;align-items:center;">
-              <div class="nav-row">
-                <button class="btn small" id="prevQuestion">← Voltar</button>
-                <button class="btn small primary" id="nextQuestion">Próxima →</button>
-              </div>
-              <div class="actions-row">
-                <button class="btn small" id="toggleGabarito">${showGabarito ? 'Ocultar gabarito' : 'Mostrar gabarito'}</button>
-                <button class="btn small" id="showCorrect">Resposta correta</button>
-              </div>
+              <div class="nav-row"><button class="btn small" id="prevQuestion">← Voltar</button><button class="btn small primary" id="nextQuestion">Próxima →</button></div>
+              <div class="actions-row"><button class="btn small" id="toggleGabarito">${showGabarito ? 'Ocultar gabarito' : 'Mostrar gabarito'}</button><button class="btn small" id="showCorrect">Resposta correta</button></div>
             </div>
           ` : `<div class="question-card">Nenhuma questão cadastrada nessa aba ainda.</div>`}
         </div>
       </main>
     </div>
   `;
-
   document.getElementById('logoutBtn').onclick = logout;
   document.getElementById('newPanelSidebar').onclick = createNewPanel;
   document.getElementById('newPanelTop').onclick = createNewPanel;
   document.getElementById('saveNow').onclick = saveCurrentPanel;
   document.getElementById('addFakeFileBtn').onclick = addFakeFile;
-
-  document.querySelectorAll('[data-panel]').forEach(function(btn){
-    btn.onclick = async function(){
-      activePanelId = btn.dataset.panel;
-      await loadQuestions();
-      await loadFiles();
-      renderApp();
-    };
-  });
-
+  document.getElementById('summaryFromFilesBtn').onclick = generateSummaryFromSelectedFiles;
+  document.querySelectorAll('[data-panel]').forEach(btn => { btn.onclick = async () => { activePanelId = btn.dataset.panel; await loadQuestions(); await loadFiles(); renderApp(); }; });
   if(active){
-    document.getElementById('panelTitle').addEventListener('input', function(e){ active.title = e.target.value; scheduleSave(active); });
-    document.getElementById('panelTopic').addEventListener('input', function(e){ active.topic = e.target.value; scheduleSave(active); });
+    document.getElementById('panelTitle').addEventListener('input', e => { active.title = e.target.value; scheduleSave(active); });
+    document.getElementById('panelTopic').addEventListener('input', e => { active.topic = e.target.value; scheduleSave(active); });
     const editor = document.getElementById('panelEditor');
-    editor.addEventListener('input', function(){ active.content_html = editor.innerHTML; scheduleSave(active); });
-
-    document.querySelectorAll('[data-cmd]').forEach(function(btn){ btn.onclick = function(){ document.execCommand(btn.dataset.cmd, false, null); }; });
-    document.getElementById('underlineBtn').onclick = function(){ wrapSelection('text-decoration:underline;text-decoration-color:#38bdf8;text-decoration-thickness:2px;'); };
-    document.getElementById('yellowBtn').onclick = function(){ wrapSelection('background:#fde68a;color:#111827;padding:1px 4px;border-radius:4px;'); };
-    document.getElementById('greenBtn').onclick = function(){ wrapSelection('background:#bbf7d0;color:#111827;padding:1px 4px;border-radius:4px;'); };
-    document.getElementById('pinkBtn').onclick = function(){ wrapSelection('background:#fbcfe8;color:#111827;padding:1px 4px;border-radius:4px;'); };
-    document.getElementById('blueBtn').onclick = function(){ wrapSelection('background:#bae6fd;color:#111827;padding:1px 4px;border-radius:4px;'); };
+    editor.addEventListener('input', () => { active.content_html = editor.innerHTML; scheduleSave(active); });
+    document.querySelectorAll('[data-cmd]').forEach(btn => { btn.onclick = () => document.execCommand(btn.dataset.cmd, false, null); });
+    document.getElementById('underlineBtn').onclick = () => wrapSelection('text-decoration:underline;text-decoration-color:#38bdf8;text-decoration-thickness:2px;');
+    document.getElementById('yellowBtn').onclick = () => wrapSelection('background:#fde68a;color:#111827;padding:1px 4px;border-radius:4px;');
+    document.getElementById('greenBtn').onclick = () => wrapSelection('background:#bbf7d0;color:#111827;padding:1px 4px;border-radius:4px;');
+    document.getElementById('pinkBtn').onclick = () => wrapSelection('background:#fbcfe8;color:#111827;padding:1px 4px;border-radius:4px;');
+    document.getElementById('blueBtn').onclick = () => wrapSelection('background:#bae6fd;color:#111827;padding:1px 4px;border-radius:4px;');
   }
-
-  document.querySelectorAll('[data-file]').forEach(function(chk){
-    chk.onchange = function(){ toggleFileSelected(chk.dataset.file, chk.checked); };
-  });
-
-  const newQuestionBtn = document.getElementById('newQuestionBtn');
-  if(newQuestionBtn) newQuestionBtn.onclick = createQuestionManual;
-  const genQuestionBtn = document.getElementById('genQuestionBtn');
-  if(genQuestionBtn) genQuestionBtn.onclick = generateQuestionAI;
-  const prevQuestion = document.getElementById('prevQuestion');
-  if(prevQuestion) prevQuestion.onclick = function(){ activeQuestionIndex = Math.max(0, activeQuestionIndex - 1); showGabarito = false; highlightCorrect = false; renderApp(); };
-  const nextQuestion = document.getElementById('nextQuestion');
-  if(nextQuestion) nextQuestion.onclick = function(){ activeQuestionIndex = Math.min(questions.length - 1, activeQuestionIndex + 1); showGabarito = false; highlightCorrect = false; renderApp(); };
-  const toggleGabarito = document.getElementById('toggleGabarito');
-  if(toggleGabarito) toggleGabarito.onclick = function(){ showGabarito = !showGabarito; renderApp(); };
-  const showCorrect = document.getElementById('showCorrect');
-  if(showCorrect) showCorrect.onclick = function(){ highlightCorrect = true; renderApp(); };
+  document.querySelectorAll('[data-file]').forEach(chk => { chk.onchange = () => toggleFileSelected(chk.dataset.file, chk.checked); });
+  const newQuestionBtn = document.getElementById('newQuestionBtn'); if(newQuestionBtn) newQuestionBtn.onclick = createQuestionManual;
+  const genQuestionBtn = document.getElementById('genQuestionBtn'); if(genQuestionBtn) genQuestionBtn.onclick = generateQuestionAI;
+  const prevQuestion = document.getElementById('prevQuestion'); if(prevQuestion) prevQuestion.onclick = () => { activeQuestionIndex = Math.max(0, activeQuestionIndex - 1); showGabarito = false; highlightCorrect = false; renderApp(); };
+  const nextQuestion = document.getElementById('nextQuestion'); if(nextQuestion) nextQuestion.onclick = () => { activeQuestionIndex = Math.min(questions.length - 1, activeQuestionIndex + 1); showGabarito = false; highlightCorrect = false; renderApp(); };
+  const toggleGabarito = document.getElementById('toggleGabarito'); if(toggleGabarito) toggleGabarito.onclick = () => { showGabarito = !showGabarito; renderApp(); };
+  const showCorrect = document.getElementById('showCorrect'); if(showCorrect) showCorrect.onclick = () => { highlightCorrect = true; renderApp(); };
 }
-
 async function createNewPanel(){
-  const title = prompt('Nome da nova aba/disciplina:', 'Nova disciplina');
-  if(!title) return;
+  const title = prompt('Nome da nova aba/disciplina:', 'Nova disciplina'); if(!title) return;
   const topic = prompt('Tema inicial da aba:', '') || '';
   const created = await createPanelInDb(title, topic, '<p>Comece a estudar por aqui.</p>');
-  if(created){
-    panels.push(created);
-    activePanelId = created.id;
-    await loadQuestions();
-    await loadFiles();
-    renderApp();
-  }
+  if(created){ panels.push(created); activePanelId = created.id; await loadQuestions(); await loadFiles(); renderApp(); }
 }
-
 async function saveCurrentPanel(){
-  const active = getActivePanel();
-  if(!active) return;
-  const statusEl = document.getElementById('saveStatus');
-  if(statusEl) statusEl.textContent = 'Salvando...';
-  const ok = await updatePanelInDb(active);
-  if(statusEl) statusEl.textContent = ok ? 'Painel salvo no Supabase.' : 'Erro ao salvar painel.';
+  const active = getActivePanel(); if(!active) return;
+  const statusEl = document.getElementById('saveStatus'); if(statusEl) statusEl.textContent = 'Salvando...';
+  const ok = await updatePanelInDb(active); if(statusEl) statusEl.textContent = ok ? 'Painel salvo no Supabase.' : 'Erro ao salvar painel.';
 }
-
 function wrapSelection(styleText){
-  const sel = window.getSelection();
-  if(!sel.rangeCount || sel.isCollapsed) return;
-  const range = sel.getRangeAt(0);
-  const span = document.createElement('span');
-  span.style.cssText = styleText;
-  try{ range.surroundContents(span); }
-  catch{ document.execCommand('insertHTML', false, '<span style="' + styleText + '">' + sel.toString() + '</span>'); }
+  const sel = window.getSelection(); if(!sel.rangeCount || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0), span = document.createElement('span'); span.style.cssText = styleText;
+  try{ range.surroundContents(span); } catch { document.execCommand('insertHTML', false, '<span style="' + styleText + '">' + sel.toString() + '</span>'); }
 }
-
 initApp();
 </script>
 </body>
 </html>
-
