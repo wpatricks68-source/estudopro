@@ -4,14 +4,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ConcursoPrep - Painel de Estudo + Questões</title>
+  <title>ConcursoPrep - Painel de Estudo + Questões + Arquivos</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; }
     :root{
       --bg:#0b1220; --bg2:#0f172a; --panel:#10192e; --panel2:#0d1527; --line:#22314d;
       --text:#e5eefc; --muted:#94a3b8; --blue:#3b82f6; --cyan:#14b8a6; --green:#10b981;
-      --yellow:#fde68a; --pink:#fbcfe8; --sky:#bae6fd; --mint:#bbf7d0;
     }
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif}
     .app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
@@ -32,7 +31,7 @@
     .btn.small{padding:8px 10px;font-size:13px}
     .grid{display:grid;gap:18px}.grid.two{grid-template-columns:1.15fr .85fr}
     .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid #202c45;border-radius:24px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
-    input,textarea,select{width:100%;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:14px;padding:12px;margin-bottom:10px}
+    input,textarea{width:100%;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:14px;padding:12px;margin-bottom:10px}
     .toolbar .tool{background:#0b1220;border:1px solid var(--line);color:#dbe7fb;border-radius:12px;padding:8px 12px;font-size:13px;cursor:pointer}
     .editor{min-height:260px;background:#0b1220;border:1px solid var(--line);border-radius:18px;padding:16px;line-height:1.8;outline:none}
     .tab{padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1220;cursor:pointer;font-weight:700;color:#dbe7fb}
@@ -42,18 +41,14 @@
     .login-card{max-width:420px;width:100%;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid #202c45;border-radius:24px;padding:24px;text-align:center}
     .small{font-size:12px;color:var(--muted)}
     .badge{display:inline-block;padding:5px 8px;border-radius:999px;font-size:11px;background:#14203a;color:#9ec5ff;border:1px solid #27416a}
-    ul{padding-left:20px}
-    .question-card{background:#0b1220;border:1px solid var(--line);border-radius:18px;padding:14px}
+    .question-card,.list-item,.file-item{background:#0b1220;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:8px}
     .alternatives label{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-top:8px;cursor:pointer}
     .alt-correct{border-color:#10b981 !important;background:rgba(16,185,129,.12)}
-    .list-item{background:#0b1220;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:8px}
     .divider{height:1px;background:#24314d;margin:14px 0}
-    .color-swatch{width:28px;height:28px;border-radius:999px;border:2px solid #fff3;cursor:pointer}
-    .file-list{display:grid;gap:8px}
-    .file-pill{padding:10px 12px;border-radius:14px;background:#101b31;border:1px solid var(--line);color:#cfe0fb;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:10px}
-    .file-pill .left{display:flex;align-items:center;gap:10px;min-width:0}
-    .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .hidden{display:none !important}
+    .file-item{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .file-left{display:flex;align-items:center;gap:10px;min-width:0}
+    .file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     @media (max-width:980px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.grid.two{grid-template-columns:1fr}}
   </style>
 </head>
@@ -66,6 +61,7 @@ let sessionUser = null;
 let panels = [];
 let activePanelId = null;
 let questions = [];
+let files = [];
 let activeQuestionIndex = 0;
 let showGabarito = false;
 let highlightCorrect = false;
@@ -88,6 +84,7 @@ async function initApp(){
         sessionUser = session.user;
         await loadPanels();
         await loadQuestions();
+        await loadFiles();
         renderApp();
       } else {
         sessionUser = null;
@@ -101,18 +98,13 @@ async function initApp(){
       sessionUser = session.user;
       await loadPanels();
       await loadQuestions();
+      await loadFiles();
       renderApp();
     } else {
       renderLogin();
     }
   }catch(err){
-    root.innerHTML = `
-      <div class="login-wrap">
-        <div class="login-card">
-          <h2>Erro ao iniciar</h2>
-          <p class="sub">${esc(err.message)}</p>
-        </div>
-      </div>`;
+    root.innerHTML = `<div class="login-wrap"><div class="login-card"><h2>Erro ao iniciar</h2><p class="sub">${esc(err.message)}</p></div></div>`;
   }
 }
 
@@ -122,7 +114,7 @@ function renderLogin(){
       <div class="login-card">
         <div class="brand">Concurso<span>Prep</span></div>
         <h2>Painel de Estudo</h2>
-        <p class="sub">Entre com Google para carregar e salvar suas abas e questões no Supabase.</p>
+        <p class="sub">Entre com Google para carregar e salvar suas abas, questões e arquivos no Supabase.</p>
         <button class="btn primary" id="loginBtn">Entrar com Google</button>
       </div>
     </div>`;
@@ -136,17 +128,11 @@ async function loginGoogle(){
   });
   if(response && response.error) alert(response.error.message);
 }
-
 async function logout(){ await sb.auth.signOut(); }
 
 async function loadPanels(){
   const response = await sb.from('study_panels').select('*').eq('user_id', sessionUser.id).order('created_at', { ascending: true });
-  if(response.error){
-    alert('Erro ao carregar painéis: ' + response.error.message);
-    panels = [];
-    activePanelId = null;
-    return;
-  }
+  if(response.error){ alert('Erro ao carregar painéis: ' + response.error.message); panels=[]; activePanelId=null; return; }
   panels = response.data || [];
   if(panels.length === 0){
     const created = await createPanelInDb('Direito Constitucional', 'Controle de constitucionalidade', '<p>Comece a estudar por aqui.</p>');
@@ -157,24 +143,15 @@ async function loadPanels(){
 
 async function createPanelInDb(title, topic, content_html){
   const response = await sb.from('study_panels').insert({
-    user_id: sessionUser.id,
-    title: title,
-    topic: topic || '',
-    content_html: content_html || ''
+    user_id: sessionUser.id, title, topic: topic || '', content_html: content_html || ''
   }).select().single();
-  if(response.error){
-    alert('Erro ao criar painel: ' + response.error.message);
-    return null;
-  }
+  if(response.error){ alert('Erro ao criar painel: ' + response.error.message); return null; }
   return response.data;
 }
 
 async function updatePanelInDb(panel){
   const response = await sb.from('study_panels').update({
-    title: panel.title,
-    topic: panel.topic,
-    content_html: panel.content_html,
-    updated_at: new Date().toISOString()
+    title: panel.title, topic: panel.topic, content_html: panel.content_html, updated_at: new Date().toISOString()
   }).eq('id', panel.id).eq('user_id', sessionUser.id);
   return !response.error;
 }
@@ -190,30 +167,27 @@ function scheduleSave(panel){
 
 async function loadQuestions(){
   const panel = getActivePanel();
-  questions = [];
-  activeQuestionIndex = 0;
-  showGabarito = false;
-  highlightCorrect = false;
+  questions = []; activeQuestionIndex = 0; showGabarito = false; highlightCorrect = false;
   if(!panel) return;
-
   const response = await sb.from('study_questions')
-    .select('*')
-    .eq('user_id', sessionUser.id)
-    .eq('study_panel_id', panel.id)
-    .order('created_at', { ascending: true });
-
-  if(response.error){
-    alert('Erro ao carregar questões: ' + response.error.message);
-    questions = [];
-    return;
-  }
+    .select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
+  if(response.error){ alert('Erro ao carregar questões: ' + response.error.message); return; }
   questions = response.data || [];
+}
+
+async function loadFiles(){
+  const panel = getActivePanel();
+  files = [];
+  if(!panel) return;
+  const response = await sb.from('study_files')
+    .select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
+  if(response.error){ alert('Erro ao carregar arquivos: ' + response.error.message); return; }
+  files = response.data || [];
 }
 
 async function createQuestionManual(){
   const panel = getActivePanel();
   if(!panel) return;
-
   const question_type = (prompt('Digite "ce" para certo/errado ou "mc" para múltipla escolha:', 'ce') || 'ce').trim().toLowerCase();
   const promptText = window.prompt('Digite o enunciado da questão:');
   if(!promptText) return;
@@ -238,16 +212,12 @@ async function createQuestionManual(){
     question_type: question_type === 'mc' ? 'mc' : 'ce',
     prompt: promptText,
     options_json: options,
-    correct_answer: correct_answer,
+    correct_answer,
     created_by: 'manual',
     difficulty: 'medio'
   });
 
-  if(response.error){
-    alert('Erro ao criar questão: ' + response.error.message);
-    return;
-  }
-
+  if(response.error){ alert('Erro ao criar questão: ' + response.error.message); return; }
   await loadQuestions();
   activeQuestionIndex = questions.length ? questions.length - 1 : 0;
   renderApp();
@@ -257,8 +227,7 @@ async function generateQuestionAI(){
   const panel = getActivePanel();
   if(!panel) return;
   const topic = panel.topic || 'tema informado';
-
-  const fakeQuestion = {
+  const response = await sb.from('study_questions').insert({
     user_id: sessionUser.id,
     study_panel_id: panel.id,
     question_type: 'mc',
@@ -267,28 +236,45 @@ async function generateQuestionAI(){
     correct_answer: 'B',
     created_by: 'ai',
     difficulty: 'medio'
-  };
-
-  const response = await sb.from('study_questions').insert(fakeQuestion);
-  if(response.error){
-    alert('Erro ao gerar questão: ' + response.error.message);
-    return;
-  }
-
+  });
+  if(response.error){ alert('Erro ao gerar questão: ' + response.error.message); return; }
   await loadQuestions();
   activeQuestionIndex = questions.length ? questions.length - 1 : 0;
   renderApp();
 }
 
-function currentQuestion(){
-  return questions[activeQuestionIndex] || null;
+async function addFakeFile(){
+  const panel = getActivePanel();
+  if(!panel) return;
+  const fileName = prompt('Nome do arquivo para registrar:', 'Aula 01 - Constitucional.pdf');
+  if(!fileName) return;
+  const response = await sb.from('study_files').insert({
+    user_id: sessionUser.id,
+    study_panel_id: panel.id,
+    file_name: fileName,
+    file_type: fileName.split('.').pop() || 'txt',
+    file_url: '',
+    is_selected_for_ai: false
+  });
+  if(response.error){ alert('Erro ao salvar arquivo: ' + response.error.message); return; }
+  await loadFiles();
+  renderApp();
 }
 
+async function toggleFileSelected(fileId, checked){
+  const response = await sb.from('study_files')
+    .update({ is_selected_for_ai: checked })
+    .eq('id', fileId)
+    .eq('user_id', sessionUser.id);
+  if(response.error){ alert('Erro ao atualizar arquivo: ' + response.error.message); return; }
+  await loadFiles();
+  renderApp();
+}
+
+function currentQuestion(){ return questions[activeQuestionIndex] || null; }
 function correctIndex(q){
   if(!q) return -1;
-  if(q.question_type === 'ce'){
-    return String(q.correct_answer).toLowerCase().includes('certo') ? 0 : 1;
-  }
+  if(q.question_type === 'ce') return String(q.correct_answer).toLowerCase().includes('certo') ? 0 : 1;
   const map = {A:0,B:1,C:2,D:3};
   return map[String(q.correct_answer).toUpperCase()] ?? -1;
 }
@@ -301,12 +287,8 @@ function renderApp(){
     <div class="app">
       <aside class="sidebar">
         <div class="brand">Concurso<span>Prep</span></div>
-        <div class="menu">
-          <button class="active">Painel de Estudo</button>
-        </div>
-        <div style="margin-top:16px;">
-          <div class="badge">${esc(sessionUser ? sessionUser.email : '')}</div>
-        </div>
+        <div class="menu"><button class="active">Painel de Estudo</button></div>
+        <div style="margin-top:16px;"><div class="badge">${esc(sessionUser ? sessionUser.email : '')}</div></div>
         <div class="top-actions" style="margin-top:16px;">
           <button class="btn ghost" id="newPanelSidebar">+ Nova aba</button>
           <button class="btn" id="logoutBtn">Sair</button>
@@ -317,7 +299,7 @@ function renderApp(){
         <div class="hero">
           <div>
             <h1>Painel de Estudo</h1>
-            <p class="sub">Agora com questões reais integradas ao Supabase, vinculadas à aba atual.</p>
+            <p class="sub">Agora com questões e arquivos-base integrados ao Supabase, vinculados à aba atual.</p>
           </div>
           <div class="top-actions">
             <button class="btn primary" id="newPanelTop">Nova aba</button>
@@ -332,11 +314,10 @@ function renderApp(){
         <div class="grid two">
           <div class="card">
             <h2>Dados da aba</h2>
-            <div class="sub">Edite o nome da aba, o assunto e o conteúdo. O salvamento é automático e também pode ser manual.</div>
+            <div class="sub">Edite o nome da aba, o assunto e o conteúdo.</div>
             ${active ? `
               <input id="panelTitle" value="${esc(active.title)}" placeholder="Nome da aba/disciplina">
               <textarea id="panelTopic" rows="3" placeholder="Tema principal">${esc(active.topic)}</textarea>
-
               <div class="toolbar">
                 <button class="tool" data-cmd="bold"><strong>B</strong></button>
                 <button class="tool" data-cmd="italic"><em>I</em></button>
@@ -346,7 +327,6 @@ function renderApp(){
                 <button class="tool" id="pinkBtn" style="background:#fbcfe8;color:#111827;">Rosa</button>
                 <button class="tool" id="blueBtn" style="background:#bae6fd;color:#111827;">Azul</button>
               </div>
-
               <div id="panelEditor" class="editor" contenteditable="true">${active.content_html || ''}</div>
             ` : `<div class="status">Nenhuma aba selecionada.</div>`}
           </div>
@@ -355,8 +335,27 @@ function renderApp(){
             <h2>Status</h2>
             <div class="status" id="saveStatus">Pronto.</div>
             <div style="margin-top:16px;">
-              <h3>Questões da aba atual</h3>
-              <div class="status">${questions.length} questão(ões) carregada(s) do Supabase.</div>
+              <h3>Resumo da aba</h3>
+              <div class="status">${questions.length} questão(ões) · ${files.length} arquivo(s)</div>
+            </div>
+
+            <div class="divider"></div>
+
+            <h3>Base de arquivos para IA</h3>
+            <div class="sub">Registre arquivos e marque quais devem ser usados como base.</div>
+            <div class="actions-row">
+              <button class="btn small primary" id="addFakeFileBtn">Adicionar arquivo</button>
+            </div>
+            <div id="fileList">
+              ${files.length ? files.map(f => `
+                <label class="file-item">
+                  <div class="file-left">
+                    <input type="checkbox" data-file="${f.id}" ${f.is_selected_for_ai ? 'checked' : ''}>
+                    <div class="file-name">📄 ${esc(f.file_name)}</div>
+                  </div>
+                  <span class="badge">${f.is_selected_for_ai ? 'Base ativa' : 'Inativo'}</span>
+                </label>
+              `).join('') : '<div class="file-item">Nenhum arquivo registrado nessa aba.</div>'}
             </div>
           </div>
         </div>
@@ -397,20 +396,7 @@ function renderApp(){
                 <button class="btn small" id="showCorrect">Resposta correta</button>
               </div>
             </div>
-          ` : `
-            <div class="question-card">
-              Nenhuma questão cadastrada nessa aba ainda.
-            </div>
-          `}
-
-          <div class="divider"></div>
-          <h3>Lista de questões da aba</h3>
-          ${(questions || []).length ? questions.map((item, idx) => `
-            <div class="list-item">
-              <strong>${idx + 1}. ${esc(item.prompt)}</strong>
-              <div class="small">Tipo: ${esc(item.question_type)} · Criada por: ${esc(item.created_by)} · Gabarito: ${esc(item.correct_answer)}</div>
-            </div>
-          `).join('') : '<div class="list-item">Nenhuma questão salva.</div>'}
+          ` : `<div class="question-card">Nenhuma questão cadastrada nessa aba ainda.</div>`}
         </div>
       </main>
     </div>
@@ -420,31 +406,24 @@ function renderApp(){
   document.getElementById('newPanelSidebar').onclick = createNewPanel;
   document.getElementById('newPanelTop').onclick = createNewPanel;
   document.getElementById('saveNow').onclick = saveCurrentPanel;
+  document.getElementById('addFakeFileBtn').onclick = addFakeFile;
+
   document.querySelectorAll('[data-panel]').forEach(function(btn){
     btn.onclick = async function(){
       activePanelId = btn.dataset.panel;
       await loadQuestions();
+      await loadFiles();
       renderApp();
     };
   });
 
   if(active){
-    document.getElementById('panelTitle').addEventListener('input', function(e){
-      active.title = e.target.value;
-      scheduleSave(active);
-    });
-    document.getElementById('panelTopic').addEventListener('input', function(e){
-      active.topic = e.target.value;
-      scheduleSave(active);
-    });
+    document.getElementById('panelTitle').addEventListener('input', function(e){ active.title = e.target.value; scheduleSave(active); });
+    document.getElementById('panelTopic').addEventListener('input', function(e){ active.topic = e.target.value; scheduleSave(active); });
     const editor = document.getElementById('panelEditor');
-    editor.addEventListener('input', function(){
-      active.content_html = editor.innerHTML;
-      scheduleSave(active);
-    });
-    document.querySelectorAll('[data-cmd]').forEach(function(btn){
-      btn.onclick = function(){ document.execCommand(btn.dataset.cmd, false, null); };
-    });
+    editor.addEventListener('input', function(){ active.content_html = editor.innerHTML; scheduleSave(active); });
+
+    document.querySelectorAll('[data-cmd]').forEach(function(btn){ btn.onclick = function(){ document.execCommand(btn.dataset.cmd, false, null); }; });
     document.getElementById('underlineBtn').onclick = function(){ wrapSelection('text-decoration:underline;text-decoration-color:#38bdf8;text-decoration-thickness:2px;'); };
     document.getElementById('yellowBtn').onclick = function(){ wrapSelection('background:#fde68a;color:#111827;padding:1px 4px;border-radius:4px;'); };
     document.getElementById('greenBtn').onclick = function(){ wrapSelection('background:#bbf7d0;color:#111827;padding:1px 4px;border-radius:4px;'); };
@@ -452,24 +431,18 @@ function renderApp(){
     document.getElementById('blueBtn').onclick = function(){ wrapSelection('background:#bae6fd;color:#111827;padding:1px 4px;border-radius:4px;'); };
   }
 
+  document.querySelectorAll('[data-file]').forEach(function(chk){
+    chk.onchange = function(){ toggleFileSelected(chk.dataset.file, chk.checked); };
+  });
+
   const newQuestionBtn = document.getElementById('newQuestionBtn');
   if(newQuestionBtn) newQuestionBtn.onclick = createQuestionManual;
   const genQuestionBtn = document.getElementById('genQuestionBtn');
   if(genQuestionBtn) genQuestionBtn.onclick = generateQuestionAI;
   const prevQuestion = document.getElementById('prevQuestion');
-  if(prevQuestion) prevQuestion.onclick = function(){
-    activeQuestionIndex = Math.max(0, activeQuestionIndex - 1);
-    showGabarito = false;
-    highlightCorrect = false;
-    renderApp();
-  };
+  if(prevQuestion) prevQuestion.onclick = function(){ activeQuestionIndex = Math.max(0, activeQuestionIndex - 1); showGabarito = false; highlightCorrect = false; renderApp(); };
   const nextQuestion = document.getElementById('nextQuestion');
-  if(nextQuestion) nextQuestion.onclick = function(){
-    activeQuestionIndex = Math.min(questions.length - 1, activeQuestionIndex + 1);
-    showGabarito = false;
-    highlightCorrect = false;
-    renderApp();
-  };
+  if(nextQuestion) nextQuestion.onclick = function(){ activeQuestionIndex = Math.min(questions.length - 1, activeQuestionIndex + 1); showGabarito = false; highlightCorrect = false; renderApp(); };
   const toggleGabarito = document.getElementById('toggleGabarito');
   if(toggleGabarito) toggleGabarito.onclick = function(){ showGabarito = !showGabarito; renderApp(); };
   const showCorrect = document.getElementById('showCorrect');
@@ -485,6 +458,7 @@ async function createNewPanel(){
     panels.push(created);
     activePanelId = created.id;
     await loadQuestions();
+    await loadFiles();
     renderApp();
   }
 }
@@ -504,11 +478,8 @@ function wrapSelection(styleText){
   const range = sel.getRangeAt(0);
   const span = document.createElement('span');
   span.style.cssText = styleText;
-  try{
-    range.surroundContents(span);
-  }catch{
-    document.execCommand('insertHTML', false, '<span style="' + styleText + '">' + sel.toString() + '</span>');
-  }
+  try{ range.surroundContents(span); }
+  catch{ document.execCommand('insertHTML', false, '<span style="' + styleText + '">' + sel.toString() + '</span>'); }
 }
 
 initApp();
