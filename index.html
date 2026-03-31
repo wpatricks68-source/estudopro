@@ -4,13 +4,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ConcursoPrep - Painel de Estudo + Supabase</title>
+  <title>ConcursoPrep - Painel de Estudo + Questões</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; }
     :root{
       --bg:#0b1220; --bg2:#0f172a; --panel:#10192e; --panel2:#0d1527; --line:#22314d;
-      --text:#e5eefc; --muted:#94a3b8; --blue:#3b82f6; --cyan:#14b8a6;
+      --text:#e5eefc; --muted:#94a3b8; --blue:#3b82f6; --cyan:#14b8a6; --green:#10b981;
+      --yellow:#fde68a; --pink:#fbcfe8; --sky:#bae6fd; --mint:#bbf7d0;
     }
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif}
     .app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
@@ -24,15 +25,16 @@
     h1,h2,h3{margin:0 0 8px}
     .hero h1{font-size:32px}
     .sub{color:var(--muted);font-size:14px;line-height:1.6;margin-bottom:12px}
-    .top-actions,.toolbar,.tabs{display:flex;gap:8px;flex-wrap:wrap}
+    .top-actions,.toolbar,.tabs,.actions-row,.nav-row,.inline-row{display:flex;gap:8px;flex-wrap:wrap}
     .btn{border:none;border-radius:14px;padding:10px 14px;background:#18243e;color:white;cursor:pointer;border:1px solid var(--line);font-weight:700}
     .btn.primary{background:linear-gradient(135deg,var(--blue),var(--cyan));border:none}
     .btn.ghost{background:#0b1220}
-    .grid{display:grid;gap:18px}.grid.two{grid-template-columns:1.2fr .8fr}
+    .btn.small{padding:8px 10px;font-size:13px}
+    .grid{display:grid;gap:18px}.grid.two{grid-template-columns:1.15fr .85fr}
     .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid #202c45;border-radius:24px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
-    input,textarea{width:100%;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:14px;padding:12px;margin-bottom:10px}
+    input,textarea,select{width:100%;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:14px;padding:12px;margin-bottom:10px}
     .toolbar .tool{background:#0b1220;border:1px solid var(--line);color:#dbe7fb;border-radius:12px;padding:8px 12px;font-size:13px;cursor:pointer}
-    .editor{min-height:320px;background:#0b1220;border:1px solid var(--line);border-radius:18px;padding:16px;line-height:1.8;outline:none}
+    .editor{min-height:260px;background:#0b1220;border:1px solid var(--line);border-radius:18px;padding:16px;line-height:1.8;outline:none}
     .tab{padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1220;cursor:pointer;font-weight:700;color:#dbe7fb}
     .tab.active{background:linear-gradient(135deg,var(--blue),var(--cyan));border:none}
     .status{padding:10px 12px;border-radius:12px;background:#0b1220;border:1px solid var(--line);font-size:13px;color:var(--muted)}
@@ -41,6 +43,17 @@
     .small{font-size:12px;color:var(--muted)}
     .badge{display:inline-block;padding:5px 8px;border-radius:999px;font-size:11px;background:#14203a;color:#9ec5ff;border:1px solid #27416a}
     ul{padding-left:20px}
+    .question-card{background:#0b1220;border:1px solid var(--line);border-radius:18px;padding:14px}
+    .alternatives label{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-top:8px;cursor:pointer}
+    .alt-correct{border-color:#10b981 !important;background:rgba(16,185,129,.12)}
+    .list-item{background:#0b1220;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:8px}
+    .divider{height:1px;background:#24314d;margin:14px 0}
+    .color-swatch{width:28px;height:28px;border-radius:999px;border:2px solid #fff3;cursor:pointer}
+    .file-list{display:grid;gap:8px}
+    .file-pill{padding:10px 12px;border-radius:14px;background:#101b31;border:1px solid var(--line);color:#cfe0fb;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .file-pill .left{display:flex;align-items:center;gap:10px;min-width:0}
+    .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .hidden{display:none !important}
     @media (max-width:980px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.grid.two{grid-template-columns:1fr}}
   </style>
 </head>
@@ -52,6 +65,10 @@ let sb = null;
 let sessionUser = null;
 let panels = [];
 let activePanelId = null;
+let questions = [];
+let activeQuestionIndex = 0;
+let showGabarito = false;
+let highlightCorrect = false;
 let saveTimer = null;
 
 function esc(s){ return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
@@ -64,15 +81,15 @@ async function initApp(){
     if(!res.ok) throw new Error('Falha ao carregar /api/supabase-config');
     const cfg = await res.json();
     if(!cfg.url || !cfg.anonKey) throw new Error('SUPABASE_URL ou SUPABASE_ANON_KEY ausentes');
-
     sb = window.supabase.createClient(cfg.url, cfg.anonKey);
 
     sb.auth.onAuthStateChange(async (_event, session) => {
       if(session && session.user){
         sessionUser = session.user;
         await loadPanels();
+        await loadQuestions();
         renderApp();
-      }else{
+      } else {
         sessionUser = null;
         renderLogin();
       }
@@ -83,8 +100,9 @@ async function initApp(){
     if(session && session.user){
       sessionUser = session.user;
       await loadPanels();
+      await loadQuestions();
       renderApp();
-    }else{
+    } else {
       renderLogin();
     }
   }catch(err){
@@ -93,10 +111,8 @@ async function initApp(){
         <div class="login-card">
           <h2>Erro ao iniciar</h2>
           <p class="sub">${esc(err.message)}</p>
-          <div class="small">Confira /api/supabase-config e as variáveis da Vercel.</div>
         </div>
-      </div>
-    `;
+      </div>`;
   }
 }
 
@@ -106,12 +122,10 @@ function renderLogin(){
       <div class="login-card">
         <div class="brand">Concurso<span>Prep</span></div>
         <h2>Painel de Estudo</h2>
-        <p class="sub">Entre com Google para carregar e salvar suas abas de estudo no Supabase.</p>
+        <p class="sub">Entre com Google para carregar e salvar suas abas e questões no Supabase.</p>
         <button class="btn primary" id="loginBtn">Entrar com Google</button>
-        <div class="small" style="margin-top:12px;">As abas, temas e conteúdo ficam salvos na sua conta.</div>
       </div>
-    </div>
-  `;
+    </div>`;
   document.getElementById('loginBtn').onclick = loginGoogle;
 }
 
@@ -123,47 +137,31 @@ async function loginGoogle(){
   if(response && response.error) alert(response.error.message);
 }
 
-async function logout(){
-  await sb.auth.signOut();
-}
+async function logout(){ await sb.auth.signOut(); }
 
 async function loadPanels(){
-  const response = await sb
-    .from('study_panels')
-    .select('*')
-    .eq('user_id', sessionUser.id)
-    .order('created_at', { ascending: true });
-
+  const response = await sb.from('study_panels').select('*').eq('user_id', sessionUser.id).order('created_at', { ascending: true });
   if(response.error){
     alert('Erro ao carregar painéis: ' + response.error.message);
     panels = [];
     activePanelId = null;
     return;
   }
-
   panels = response.data || [];
-
   if(panels.length === 0){
     const created = await createPanelInDb('Direito Constitucional', 'Controle de constitucionalidade', '<p>Comece a estudar por aqui.</p>');
     if(created) panels = [created];
   }
-
   activePanelId = panels.length ? panels[0].id : null;
 }
 
 async function createPanelInDb(title, topic, content_html){
-  const payload = {
+  const response = await sb.from('study_panels').insert({
     user_id: sessionUser.id,
     title: title,
     topic: topic || '',
     content_html: content_html || ''
-  };
-  const response = await sb
-    .from('study_panels')
-    .insert(payload)
-    .select()
-    .single();
-
+  }).select().single();
   if(response.error){
     alert('Erro ao criar painel: ' + response.error.message);
     return null;
@@ -172,21 +170,13 @@ async function createPanelInDb(title, topic, content_html){
 }
 
 async function updatePanelInDb(panel){
-  const response = await sb
-    .from('study_panels')
-    .update({
-      title: panel.title,
-      topic: panel.topic,
-      content_html: panel.content_html,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', panel.id)
-    .eq('user_id', sessionUser.id);
-
-  if(response.error){
-    return false;
-  }
-  return true;
+  const response = await sb.from('study_panels').update({
+    title: panel.title,
+    topic: panel.topic,
+    content_html: panel.content_html,
+    updated_at: new Date().toISOString()
+  }).eq('id', panel.id).eq('user_id', sessionUser.id);
+  return !response.error;
 }
 
 function scheduleSave(panel){
@@ -194,12 +184,119 @@ function scheduleSave(panel){
   saveTimer = setTimeout(async function(){
     const ok = await updatePanelInDb(panel);
     const statusEl = document.getElementById('saveStatus');
-    if(statusEl) statusEl.textContent = ok ? 'Salvo no Supabase.' : 'Erro ao salvar.';
+    if(statusEl) statusEl.textContent = ok ? 'Painel salvo no Supabase.' : 'Erro ao salvar painel.';
   }, 700);
+}
+
+async function loadQuestions(){
+  const panel = getActivePanel();
+  questions = [];
+  activeQuestionIndex = 0;
+  showGabarito = false;
+  highlightCorrect = false;
+  if(!panel) return;
+
+  const response = await sb.from('study_questions')
+    .select('*')
+    .eq('user_id', sessionUser.id)
+    .eq('study_panel_id', panel.id)
+    .order('created_at', { ascending: true });
+
+  if(response.error){
+    alert('Erro ao carregar questões: ' + response.error.message);
+    questions = [];
+    return;
+  }
+  questions = response.data || [];
+}
+
+async function createQuestionManual(){
+  const panel = getActivePanel();
+  if(!panel) return;
+
+  const question_type = (prompt('Digite "ce" para certo/errado ou "mc" para múltipla escolha:', 'ce') || 'ce').trim().toLowerCase();
+  const promptText = window.prompt('Digite o enunciado da questão:');
+  if(!promptText) return;
+
+  let options = [];
+  let correct_answer = '';
+  if(question_type === 'mc'){
+    const a = window.prompt('Alternativa A:') || '';
+    const b = window.prompt('Alternativa B:') || '';
+    const c = window.prompt('Alternativa C:') || '';
+    const d = window.prompt('Alternativa D:') || '';
+    options = [a,b,c,d];
+    correct_answer = window.prompt('Digite a correta: A, B, C ou D', 'A') || 'A';
+  } else {
+    options = ['Certo', 'Errado'];
+    correct_answer = window.prompt('Digite a correta: Certo ou Errado', 'Certo') || 'Certo';
+  }
+
+  const response = await sb.from('study_questions').insert({
+    user_id: sessionUser.id,
+    study_panel_id: panel.id,
+    question_type: question_type === 'mc' ? 'mc' : 'ce',
+    prompt: promptText,
+    options_json: options,
+    correct_answer: correct_answer,
+    created_by: 'manual',
+    difficulty: 'medio'
+  });
+
+  if(response.error){
+    alert('Erro ao criar questão: ' + response.error.message);
+    return;
+  }
+
+  await loadQuestions();
+  activeQuestionIndex = questions.length ? questions.length - 1 : 0;
+  renderApp();
+}
+
+async function generateQuestionAI(){
+  const panel = getActivePanel();
+  if(!panel) return;
+  const topic = panel.topic || 'tema informado';
+
+  const fakeQuestion = {
+    user_id: sessionUser.id,
+    study_panel_id: panel.id,
+    question_type: 'mc',
+    prompt: 'Questão gerada sobre ' + topic,
+    options_json: ['Alternativa A', 'Alternativa correta', 'Alternativa C', 'Alternativa D'],
+    correct_answer: 'B',
+    created_by: 'ai',
+    difficulty: 'medio'
+  };
+
+  const response = await sb.from('study_questions').insert(fakeQuestion);
+  if(response.error){
+    alert('Erro ao gerar questão: ' + response.error.message);
+    return;
+  }
+
+  await loadQuestions();
+  activeQuestionIndex = questions.length ? questions.length - 1 : 0;
+  renderApp();
+}
+
+function currentQuestion(){
+  return questions[activeQuestionIndex] || null;
+}
+
+function correctIndex(q){
+  if(!q) return -1;
+  if(q.question_type === 'ce'){
+    return String(q.correct_answer).toLowerCase().includes('certo') ? 0 : 1;
+  }
+  const map = {A:0,B:1,C:2,D:3};
+  return map[String(q.correct_answer).toUpperCase()] ?? -1;
 }
 
 function renderApp(){
   const active = getActivePanel();
+  const q = currentQuestion();
+
   document.getElementById('root').innerHTML = `
     <div class="app">
       <aside class="sidebar">
@@ -220,7 +317,7 @@ function renderApp(){
         <div class="hero">
           <div>
             <h1>Painel de Estudo</h1>
-            <p class="sub">Abas reais integradas ao Supabase. Você pode criar, trocar e salvar título, tema e conteúdo de cada aba.</p>
+            <p class="sub">Agora com questões reais integradas ao Supabase, vinculadas à aba atual.</p>
           </div>
           <div class="top-actions">
             <button class="btn primary" id="newPanelTop">Nova aba</button>
@@ -257,22 +354,63 @@ function renderApp(){
           <div class="card">
             <h2>Status</h2>
             <div class="status" id="saveStatus">Pronto.</div>
-
             <div style="margin-top:16px;">
-              <h3>Como funciona</h3>
-              <ul class="sub">
-                <li>As abas são salvas em <strong>study_panels</strong>.</li>
-                <li>O nome salva em <strong>title</strong>.</li>
-                <li>O tema salva em <strong>topic</strong>.</li>
-                <li>O conteúdo editável salva em <strong>content_html</strong>.</li>
-              </ul>
-            </div>
-
-            <div style="margin-top:16px;">
-              <h3>Próxima etapa</h3>
-              <p class="sub">Depois disso, o próximo bloco ideal é integrar as questões em <strong>study_questions</strong>.</p>
+              <h3>Questões da aba atual</h3>
+              <div class="status">${questions.length} questão(ões) carregada(s) do Supabase.</div>
             </div>
           </div>
+        </div>
+
+        <div class="card" style="margin-top:18px;">
+          <div class="hero" style="margin-bottom:12px;">
+            <div>
+              <h2>Painel de Questões</h2>
+              <p class="sub">Crie questões manuais, gere questões por IA e navegue entre as questões da aba atual.</p>
+            </div>
+            <div class="top-actions">
+              <button class="btn" id="newQuestionBtn">Nova questão</button>
+              <button class="btn primary" id="genQuestionBtn">Gerar com IA</button>
+            </div>
+          </div>
+
+          ${q ? `
+            <div class="question-card">
+              <strong>Questão ${activeQuestionIndex + 1} de ${questions.length}</strong>
+              <p style="margin-top:10px;">${esc(q.prompt)}</p>
+              <div class="alternatives">
+                ${(q.options_json || []).map((opt, i) => `
+                  <label class="${highlightCorrect && i === correctIndex(q) ? 'alt-correct' : ''}">
+                    <input type="radio" name="qactive"> ${String.fromCharCode(65+i)}) ${esc(opt)}
+                  </label>
+                `).join('')}
+              </div>
+              ${showGabarito ? `<p class="sub" style="margin-top:12px;">Gabarito: ${esc(q.correct_answer)}</p>` : ''}
+            </div>
+
+            <div class="inline-row" style="margin-top:12px;justify-content:space-between;align-items:center;">
+              <div class="nav-row">
+                <button class="btn small" id="prevQuestion">← Voltar</button>
+                <button class="btn small primary" id="nextQuestion">Próxima →</button>
+              </div>
+              <div class="actions-row">
+                <button class="btn small" id="toggleGabarito">${showGabarito ? 'Ocultar gabarito' : 'Mostrar gabarito'}</button>
+                <button class="btn small" id="showCorrect">Resposta correta</button>
+              </div>
+            </div>
+          ` : `
+            <div class="question-card">
+              Nenhuma questão cadastrada nessa aba ainda.
+            </div>
+          `}
+
+          <div class="divider"></div>
+          <h3>Lista de questões da aba</h3>
+          ${(questions || []).length ? questions.map((item, idx) => `
+            <div class="list-item">
+              <strong>${idx + 1}. ${esc(item.prompt)}</strong>
+              <div class="small">Tipo: ${esc(item.question_type)} · Criada por: ${esc(item.created_by)} · Gabarito: ${esc(item.correct_answer)}</div>
+            </div>
+          `).join('') : '<div class="list-item">Nenhuma questão salva.</div>'}
         </div>
       </main>
     </div>
@@ -282,10 +420,10 @@ function renderApp(){
   document.getElementById('newPanelSidebar').onclick = createNewPanel;
   document.getElementById('newPanelTop').onclick = createNewPanel;
   document.getElementById('saveNow').onclick = saveCurrentPanel;
-
   document.querySelectorAll('[data-panel]').forEach(function(btn){
-    btn.onclick = function(){
+    btn.onclick = async function(){
       activePanelId = btn.dataset.panel;
+      await loadQuestions();
       renderApp();
     };
   });
@@ -295,28 +433,47 @@ function renderApp(){
       active.title = e.target.value;
       scheduleSave(active);
     });
-
     document.getElementById('panelTopic').addEventListener('input', function(e){
       active.topic = e.target.value;
       scheduleSave(active);
     });
-
     const editor = document.getElementById('panelEditor');
     editor.addEventListener('input', function(){
       active.content_html = editor.innerHTML;
       scheduleSave(active);
     });
-
     document.querySelectorAll('[data-cmd]').forEach(function(btn){
       btn.onclick = function(){ document.execCommand(btn.dataset.cmd, false, null); };
     });
-
     document.getElementById('underlineBtn').onclick = function(){ wrapSelection('text-decoration:underline;text-decoration-color:#38bdf8;text-decoration-thickness:2px;'); };
     document.getElementById('yellowBtn').onclick = function(){ wrapSelection('background:#fde68a;color:#111827;padding:1px 4px;border-radius:4px;'); };
     document.getElementById('greenBtn').onclick = function(){ wrapSelection('background:#bbf7d0;color:#111827;padding:1px 4px;border-radius:4px;'); };
     document.getElementById('pinkBtn').onclick = function(){ wrapSelection('background:#fbcfe8;color:#111827;padding:1px 4px;border-radius:4px;'); };
     document.getElementById('blueBtn').onclick = function(){ wrapSelection('background:#bae6fd;color:#111827;padding:1px 4px;border-radius:4px;'); };
   }
+
+  const newQuestionBtn = document.getElementById('newQuestionBtn');
+  if(newQuestionBtn) newQuestionBtn.onclick = createQuestionManual;
+  const genQuestionBtn = document.getElementById('genQuestionBtn');
+  if(genQuestionBtn) genQuestionBtn.onclick = generateQuestionAI;
+  const prevQuestion = document.getElementById('prevQuestion');
+  if(prevQuestion) prevQuestion.onclick = function(){
+    activeQuestionIndex = Math.max(0, activeQuestionIndex - 1);
+    showGabarito = false;
+    highlightCorrect = false;
+    renderApp();
+  };
+  const nextQuestion = document.getElementById('nextQuestion');
+  if(nextQuestion) nextQuestion.onclick = function(){
+    activeQuestionIndex = Math.min(questions.length - 1, activeQuestionIndex + 1);
+    showGabarito = false;
+    highlightCorrect = false;
+    renderApp();
+  };
+  const toggleGabarito = document.getElementById('toggleGabarito');
+  if(toggleGabarito) toggleGabarito.onclick = function(){ showGabarito = !showGabarito; renderApp(); };
+  const showCorrect = document.getElementById('showCorrect');
+  if(showCorrect) showCorrect.onclick = function(){ highlightCorrect = true; renderApp(); };
 }
 
 async function createNewPanel(){
@@ -327,6 +484,7 @@ async function createNewPanel(){
   if(created){
     panels.push(created);
     activePanelId = created.id;
+    await loadQuestions();
     renderApp();
   }
 }
@@ -337,7 +495,7 @@ async function saveCurrentPanel(){
   const statusEl = document.getElementById('saveStatus');
   if(statusEl) statusEl.textContent = 'Salvando...';
   const ok = await updatePanelInDb(active);
-  if(statusEl) statusEl.textContent = ok ? 'Salvo no Supabase.' : 'Erro ao salvar.';
+  if(statusEl) statusEl.textContent = ok ? 'Painel salvo no Supabase.' : 'Erro ao salvar painel.';
 }
 
 function wrapSelection(styleText){
