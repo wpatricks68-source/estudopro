@@ -1,126 +1,138 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
     }
 
     const {
       mode,
-      topic = '',
-      panelTitle = '',
+      topic = "",
+      panelTitle = "",
       files = [],
-      model = 'claude-sonnet-4-6',
-      max_tokens = 1400,
-      system,
-      messages
+      model = "claude-3-5-sonnet-20241022",
+      max_tokens = 1800
     } = req.body || {};
 
-    if (mode === 'summary_from_files') {
-      const selectedFiles = Array.isArray(files) ? files : [];
+    // 🔥 MODO: RESUMO BASEADO EM ARQUIVOS
+    if (mode === "summary_from_files") {
 
-      const fileList = selectedFiles.length
-        ? selectedFiles.map((f, i) => {
-            const name = f && f.file_name ? f.file_name : `arquivo_${i + 1}`;
-            const type = f && f.file_type ? f.file_type : 'desconhecido';
-            const url = f && f.file_url ? f.file_url : '';
-            return `Arquivo ${i + 1}: ${name} | tipo: ${type} | url: ${url}`;
-          }).join('\n')
-        : 'Nenhum arquivo informado.';
+      const extracted = [];
+      const skipped = [];
 
-      const prompt = [
-        'Você é um professor especialista em concursos públicos.',
-        'Gere um resumo claro, didático e objetivo em português do Brasil.',
-        '',
-        `Painel: ${panelTitle || 'Sem título'}`,
-        `Tema: ${topic || 'Tema não informado'}`,
-        '',
-        'Arquivos selecionados como base:',
-        fileList,
-        '',
-        'Importante:',
-        '- Se os arquivos vierem apenas com nome e URL, use essas referências como contexto nominal.',
-        '- Se não houver conteúdo textual dos arquivos disponível, ainda produza um resumo útil sobre o tema.',
-        '- Organize em tópicos curtos.',
-        '- Foque em revisão para estudo.'
-      ].join('\n');
+      for (const file of files) {
+        const fileName = file.file_name || "arquivo";
+        const fileUrl = file.file_url;
 
-      const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
+        if (!fileUrl) {
+          skipped.push({ file: fileName, reason: "sem URL" });
+          continue;
+        }
+
+        try {
+          const response = await fetch(fileUrl);
+          const buffer = Buffer.from(await response.arrayBuffer());
+
+          let text = "";
+
+          // 📄 PDF
+          if (fileName.toLowerCase().endsWith(".pdf")) {
+            const pdfParse = (await import("pdf-parse")).default;
+            const parsed = await pdfParse(buffer);
+            text = parsed.text;
+          }
+
+          // 📄 TXT
+          else {
+            text = buffer.toString("utf-8");
+          }
+
+          if (!text) {
+            skipped.push({ file: fileName, reason: "texto vazio" });
+            continue;
+          }
+
+          extracted.push({
+            file_name: fileName,
+            text: text.slice(0, 15000)
+          });
+
+        } catch (err) {
+          skipped.push({ file: fileName, reason: "erro leitura" });
+        }
+      }
+
+      if (!extracted.length) {
+        return res.status(400).json({
+          error: "Nenhum arquivo válido",
+          skipped
+        });
+      }
+
+      const compiledText = extracted.map((f, i) => {
+        return `ARQUIVO ${i + 1}: ${f.file_name}\n${f.text}\n`;
+      }).join("\n");
+
+      const prompt = `
+Você é um professor especialista em concursos públicos.
+
+Gere um resumo claro, organizado e direto.
+
+Tema: ${topic}
+Painel: ${panelTitle}
+
+Regras:
+- usar tópicos
+- destacar pontos importantes
+- foco em prova
+- linguagem simples
+
+CONTEÚDO:
+${compiledText}
+`;
+
+      const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
           model,
           max_tokens,
           messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
+            { role: "user", content: prompt }
           ]
         })
       });
 
-      const data = await anthropicRes.json();
+      const data = await aiResponse.json();
 
-      if (!anthropicRes.ok) {
-        return res.status(anthropicRes.status).json({
-          error: data && data.error && data.error.message ? data.error.message : 'Anthropic request failed',
-          raw: data
-        });
+      if (!aiResponse.ok) {
+        return res.status(500).json(data);
       }
 
-      const summary = data && data.content
-        ? data.content.map(part => part && part.text ? part.text : '').join('\n').trim()
-        : '';
+      const summary = data.content.map(c => c.text).join("\n");
 
       return res.status(200).json({
         summary,
-        raw: data
+        arquivos_lidos: extracted.map(f => f.file_name),
+        ignorados: skipped
       });
-    }
-
-    if (Array.isArray(messages)) {
-      const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens,
-          system: system || 'Responda em português do Brasil.',
-          messages
-        })
-      });
-
-      const data = await anthropicRes.json();
-
-      if (!anthropicRes.ok) {
-        return res.status(anthropicRes.status).json({
-          error: data && data.error && data.error.message ? data.error.message : 'Anthropic request failed',
-          raw: data
-        });
-      }
-
-      return res.status(200).json(data);
     }
 
     return res.status(400).json({
-      error: 'Invalid payload. Use mode="summary_from_files" or send messages.'
+      error: "Modo inválido"
     });
+
   } catch (error) {
     return res.status(500).json({
-      error: error && error.message ? error.message : 'Internal server error'
+      error: error.message
     });
   }
 }
