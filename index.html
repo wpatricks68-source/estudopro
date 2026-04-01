@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ConcursoPrep - Versão Blindada</title>
+  <title>ConcursoPrep - Upload real de arquivos</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     *{box-sizing:border-box}
@@ -23,6 +23,7 @@
     .btn{border:none;border-radius:14px;padding:10px 14px;background:#18243e;color:white;cursor:pointer;border:1px solid var(--line);font-weight:700}
     .btn.primary{background:linear-gradient(135deg,var(--blue),var(--cyan));border:none}
     .btn.ghost{background:#0b1220}.btn.small{padding:8px 10px;font-size:13px}
+    .btn.danger{background:#34131f;border-color:#6b2439}
     .grid{display:grid;gap:18px}.grid.two{grid-template-columns:1.15fr .85fr}
     .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid #202c45;border-radius:24px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
     input,textarea{width:100%;background:#091120;border:1px solid var(--line);color:var(--text);border-radius:14px;padding:12px;margin-bottom:10px}
@@ -39,9 +40,11 @@
     .alt-correct{border-color:#10b981 !important;background:rgba(16,185,129,.12)}
     .divider{height:1px;background:#24314d;margin:14px 0}
     .file-item{display:flex;align-items:center;justify-content:space-between;gap:10px}
-    .file-left{display:flex;align-items:center;gap:10px;min-width:0}
+    .file-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
     .file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .small{font-size:12px;color:var(--muted)}
+    .hidden{display:none}
+    a.link{color:#9ec5ff;text-decoration:none}
     @media (max-width:980px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.grid.two{grid-template-columns:1fr}}
   </style>
 </head>
@@ -60,6 +63,7 @@ let highlightCorrect = false;
 let saveTimer = null;
 let authListenerBound = false;
 let booting = false;
+const STORAGE_BUCKET = 'study-files';
 
 function esc(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
 function getActivePanel(){ return panels.find(p => p.id === activePanelId) || null; }
@@ -74,14 +78,9 @@ async function safeInitSupabase(){
   if(!res.ok) throw new Error('Falha ao carregar /api/supabase-config');
   const cfg = await res.json();
   if(!cfg.url || !cfg.anonKey) throw new Error('SUPABASE_URL ou SUPABASE_ANON_KEY ausentes');
-
   if(!window.__concursoprepSupabaseClient){
     window.__concursoprepSupabaseClient = window.supabase.createClient(cfg.url, cfg.anonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
+      auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
     });
   }
   sb = window.__concursoprepSupabaseClient;
@@ -93,37 +92,22 @@ async function initApp(){
   renderLoading('Conectando ao Supabase...');
   try{
     await safeInitSupabase();
-
     if(!authListenerBound){
       sb.auth.onAuthStateChange(async (_event, session) => {
-        if(session && session.user){
-          sessionUser = session.user;
-          await afterLoginLoad();
-        } else {
-          sessionUser = null;
-          renderLogin();
-        }
+        if(session && session.user){ sessionUser = session.user; await afterLoginLoad(); }
+        else { sessionUser = null; renderLogin(); }
       });
       authListenerBound = true;
     }
-
     const sessionResponse = await sb.auth.getSession();
     const session = sessionResponse && sessionResponse.data ? sessionResponse.data.session : null;
-
-    if(session && session.user){
-      sessionUser = session.user;
-      await afterLoginLoad();
-    } else {
-      renderLogin();
-    }
+    if(session && session.user){ sessionUser = session.user; await afterLoginLoad(); }
+    else renderLogin();
   }catch(err){
-    document.getElementById('root').innerHTML =
-      '<div class="login-wrap"><div class="login-card"><h2>Erro ao iniciar</h2><p class="sub">'+esc(err.message)+'</p><div class="actions-row" style="justify-content:center"><button class="btn primary" id="retryBoot">Tentar novamente</button></div></div></div>';
+    document.getElementById('root').innerHTML = '<div class="login-wrap"><div class="login-card"><h2>Erro ao iniciar</h2><p class="sub">'+esc(err.message)+'</p><div class="actions-row" style="justify-content:center"><button class="btn primary" id="retryBoot">Tentar novamente</button></div></div></div>';
     const btn = document.getElementById('retryBoot');
     if(btn) btn.onclick = () => { booting = false; initApp(); };
-  }finally{
-    booting = false;
-  }
+  }finally{ booting = false; }
 }
 
 async function afterLoginLoad(){
@@ -135,35 +119,20 @@ async function afterLoginLoad(){
 }
 
 function renderLogin(){
-  document.getElementById('root').innerHTML =
-    '<div class="login-wrap"><div class="login-card"><div class="brand">Concurso<span>Prep</span></div><h2>Painel de Estudo</h2><p class="sub">Versão blindada contra travamento de sessão. Entre com Google para carregar suas abas, questões e arquivos.</p><div class="actions-row" style="justify-content:center"><button class="btn primary" id="loginBtn">Entrar com Google</button><button class="btn" id="refreshBtn">Recarregar sessão</button></div></div></div>';
+  document.getElementById('root').innerHTML = '<div class="login-wrap"><div class="login-card"><div class="brand">Concurso<span>Prep</span></div><h2>Painel de Estudo</h2><p class="sub">Entre com Google para carregar suas abas, questões e arquivos.</p><div class="actions-row" style="justify-content:center"><button class="btn primary" id="loginBtn">Entrar com Google</button><button class="btn" id="refreshBtn">Recarregar sessão</button></div></div></div>';
   document.getElementById('loginBtn').onclick = loginGoogle;
-  document.getElementById('refreshBtn').onclick = async () => {
-    try { await sb.auth.signOut({ scope: 'local' }); } catch(e) {}
-    location.reload();
-  };
+  document.getElementById('refreshBtn').onclick = async () => { try { await sb.auth.signOut({ scope:'local' }); } catch(e) {} location.reload(); };
 }
 
 async function loginGoogle(){
-  const response = await sb.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.origin }
-  });
+  const response = await sb.auth.signInWithOAuth({ provider:'google', options:{ redirectTo: window.location.origin } });
   if(response && response.error) alert(response.error.message);
 }
-
-async function logout(){
-  try { await sb.auth.signOut(); } catch(e) {}
-  sessionUser = null;
-  location.reload();
-}
+async function logout(){ try { await sb.auth.signOut(); } catch(e) {} sessionUser = null; location.reload(); }
 
 async function loadPanels(){
-  const response = await sb.from('study_panels').select('*').eq('user_id', sessionUser.id).order('created_at', { ascending: true });
-  if(response.error){
-    alert('Erro ao carregar painéis: ' + response.error.message);
-    panels = []; activePanelId = null; return;
-  }
+  const response = await sb.from('study_panels').select('*').eq('user_id', sessionUser.id).order('created_at', { ascending:true });
+  if(response.error){ alert('Erro ao carregar painéis: ' + response.error.message); panels=[]; activePanelId=null; return; }
   panels = response.data || [];
   if(panels.length === 0){
     const created = await createPanelInDb('Direito Constitucional', 'Controle de constitucionalidade', '<p>Comece a estudar por aqui.</p>');
@@ -174,10 +143,7 @@ async function loadPanels(){
 
 async function createPanelInDb(title, topic, content_html){
   const response = await sb.from('study_panels').insert({
-    user_id: sessionUser.id,
-    title: title,
-    topic: topic || '',
-    content_html: content_html || ''
+    user_id: sessionUser.id, title:title, topic:topic || '', content_html:content_html || ''
   }).select().single();
   if(response.error){ alert('Erro ao criar painel: ' + response.error.message); return null; }
   return response.data;
@@ -185,10 +151,7 @@ async function createPanelInDb(title, topic, content_html){
 
 async function updatePanelInDb(panel){
   const response = await sb.from('study_panels').update({
-    title: panel.title,
-    topic: panel.topic,
-    content_html: panel.content_html,
-    updated_at: new Date().toISOString()
+    title: panel.title, topic: panel.topic, content_html: panel.content_html, updated_at: new Date().toISOString()
   }).eq('id', panel.id).eq('user_id', sessionUser.id);
   return !response.error;
 }
@@ -205,7 +168,7 @@ async function loadQuestions(){
   const panel = getActivePanel();
   questions = []; activeQuestionIndex = 0; showGabarito = false; highlightCorrect = false;
   if(!panel) return;
-  const response = await sb.from('study_questions').select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
+  const response = await sb.from('study_questions').select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending:true });
   if(response.error){ alert('Erro ao carregar questões: ' + response.error.message); return; }
   questions = response.data || [];
 }
@@ -214,46 +177,87 @@ async function loadFiles(){
   const panel = getActivePanel();
   files = [];
   if(!panel) return;
-  const response = await sb.from('study_files').select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending: true });
+  const response = await sb.from('study_files').select('*').eq('user_id', sessionUser.id).eq('study_panel_id', panel.id).order('created_at', { ascending:true });
   if(response.error){ alert('Erro ao carregar arquivos: ' + response.error.message); return; }
   files = response.data || [];
 }
 
-async function addFile(){
+function openFilePicker(){
+  const input = document.getElementById('realFileInput');
+  if(input) input.click();
+}
+
+async function uploadRealFile(evt){
   const panel = getActivePanel();
-  if(!panel){ alert('Salve ou selecione uma aba antes de adicionar arquivos.'); return; }
-  const name = prompt('Nome do arquivo para registrar:', 'Aula 01 - Constitucional.pdf');
-  if(!name) return;
-  setStatus('Salvando arquivo...');
+  if(!panel){ alert('Selecione uma aba antes de enviar arquivo.'); evt.target.value = ''; return; }
+  const file = evt.target.files && evt.target.files[0];
+  if(!file) return;
+  setStatus('Enviando arquivo...');
   try{
-    const response = await sb.from('study_files').insert({
+    const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = sessionUser.id + '/' + panel.id + '/' + Date.now() + '_' + sanitized;
+
+    const uploadRes = await sb.storage.from(STORAGE_BUCKET).upload(path, file, { upsert:false });
+    if(uploadRes.error) throw uploadRes.error;
+
+    const publicRes = sb.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+    const publicUrl = publicRes && publicRes.data ? publicRes.data.publicUrl : '';
+
+    const insertRes = await sb.from('study_files').insert({
       user_id: sessionUser.id,
       study_panel_id: panel.id,
-      file_name: name,
-      file_type: name.includes('.') ? name.split('.').pop() : 'txt',
-      file_url: '',
+      file_name: file.name,
+      file_type: file.type || (file.name.includes('.') ? file.name.split('.').pop() : ''),
+      file_url: publicUrl,
       is_selected_for_ai: false
     });
-    if(response.error) throw response.error;
+    if(insertRes.error) throw insertRes.error;
+
     await loadFiles();
     renderApp();
-    setStatus('Arquivo adicionado com sucesso.');
+    setStatus('Arquivo enviado com sucesso.');
   }catch(err){
     console.error(err);
-    alert('Erro ao salvar arquivo: ' + (err.message || 'erro desconhecido'));
-    setStatus('Erro ao salvar arquivo.');
+    alert('Erro ao enviar arquivo. Verifique se o bucket "study-files" existe no Supabase Storage e está acessível. Erro: ' + (err.message || 'desconhecido'));
+    setStatus('Erro ao enviar arquivo.');
+  }finally{
+    evt.target.value = '';
   }
 }
 
 async function toggleFile(id, checked){
   const response = await sb.from('study_files').update({ is_selected_for_ai: checked }).eq('id', id).eq('user_id', sessionUser.id);
-  if(response.error){
-    console.error(response.error);
-    alert('Erro ao atualizar seleção do arquivo.');
-    return;
-  }
+  if(response.error){ console.error(response.error); alert('Erro ao atualizar seleção do arquivo.'); return; }
   await loadFiles();
   renderFilesOnly();
+}
+
+async function deleteFile(id){
+  const file = files.find(f => f.id === id);
+  if(!file) return;
+  const ok = confirm('Excluir este arquivo?');
+  if(!ok) return;
+  setStatus('Excluindo arquivo...');
+  try{
+    if(file.file_url){
+      const marker = '/' + STORAGE_BUCKET + '/';
+      const idx = file.file_url.indexOf(marker);
+      if(idx >= 0){
+        const path = file.file_url.slice(idx + marker.length);
+        const removeRes = await sb.storage.from(STORAGE_BUCKET).remove([path]);
+        if(removeRes.error) console.warn(removeRes.error);
+      }
+    }
+    const dbRes = await sb.from('study_files').delete().eq('id', id).eq('user_id', sessionUser.id);
+    if(dbRes.error) throw dbRes.error;
+    await loadFiles();
+    renderApp();
+    setStatus('Arquivo excluído.');
+  }catch(err){
+    console.error(err);
+    alert('Erro ao excluir arquivo: ' + (err.message || 'desconhecido'));
+    setStatus('Erro ao excluir arquivo.');
+  }
 }
 
 function renderFilesOnly(){
@@ -261,23 +265,22 @@ function renderFilesOnly(){
   const summaryBox = document.getElementById('summaryCounts');
   if(!container) return;
   if(!files.length){
-    container.innerHTML = '<div class="file-item">Nenhum arquivo registrado nessa aba.</div>';
+    container.innerHTML = '<div class="file-item">Nenhum arquivo nessa aba.</div>';
   } else {
-    container.innerHTML = files.map(file => '<label class="file-item"><div class="file-left"><input type="checkbox" data-file="'+file.id+'" '+(file.is_selected_for_ai ? 'checked' : '')+'><div class="file-name">📄 '+esc(file.file_name)+'</div></div><span class="badge">'+(file.is_selected_for_ai ? 'Base ativa' : 'Inativo')+'</span></label>').join('');
+    container.innerHTML = files.map(file => '<div class="file-item"><div class="file-left"><input type="checkbox" data-file="'+file.id+'" '+(file.is_selected_for_ai ? 'checked' : '')+'><div class="file-name">📄 '+esc(file.file_name)+'</div></div><div class="actions-row"><a class="link small" href="'+esc(file.file_url || '#')+'" target="_blank" rel="noopener">'+(file.file_url ? 'abrir' : 'sem link')+'</a><button class="btn small danger" data-del="'+file.id+'">Excluir</button></div></div>').join('');
   }
   if(summaryBox){
     const selectedCount = files.filter(f => f.is_selected_for_ai).length;
     summaryBox.textContent = questions.length + ' questão(ões) · ' + files.length + ' arquivo(s) · ' + selectedCount + ' selecionado(s)';
   }
   document.querySelectorAll('[data-file]').forEach(chk => { chk.onchange = () => toggleFile(chk.dataset.file, chk.checked); });
+  document.querySelectorAll('[data-del]').forEach(btn => { btn.onclick = () => deleteFile(btn.dataset.del); });
 }
 
 async function createQuestionManual(){
-  const panel = getActivePanel();
-  if(!panel) return;
+  const panel = getActivePanel(); if(!panel) return;
   const question_type = (prompt('Digite "ce" para certo/errado ou "mc" para múltipla escolha:', 'ce') || 'ce').trim().toLowerCase();
-  const promptText = window.prompt('Digite o enunciado da questão:');
-  if(!promptText) return;
+  const promptText = window.prompt('Digite o enunciado da questão:'); if(!promptText) return;
   let options = [], correct_answer = '';
   if(question_type === 'mc'){
     const a = window.prompt('Alternativa A:') || '';
@@ -291,47 +294,30 @@ async function createQuestionManual(){
     correct_answer = window.prompt('Digite a correta: Certo ou Errado', 'Certo') || 'Certo';
   }
   const response = await sb.from('study_questions').insert({
-    user_id: sessionUser.id,
-    study_panel_id: panel.id,
-    question_type: question_type === 'mc' ? 'mc' : 'ce',
-    prompt: promptText,
-    options_json: options,
-    correct_answer: correct_answer,
-    created_by: 'manual',
-    difficulty: 'medio'
+    user_id: sessionUser.id, study_panel_id: panel.id, question_type: question_type === 'mc' ? 'mc' : 'ce',
+    prompt: promptText, options_json: options, correct_answer: correct_answer, created_by: 'manual', difficulty: 'medio'
   });
   if(response.error){ alert('Erro ao criar questão: ' + response.error.message); return; }
-  await loadQuestions();
-  activeQuestionIndex = questions.length ? questions.length - 1 : 0;
-  renderApp();
+  await loadQuestions(); activeQuestionIndex = questions.length ? questions.length - 1 : 0; renderApp();
 }
 
 async function generateQuestionAI(){
-  const panel = getActivePanel();
-  if(!panel) return;
+  const panel = getActivePanel(); if(!panel) return;
   const topic = panel.topic || 'tema informado';
   const response = await sb.from('study_questions').insert({
-    user_id: sessionUser.id,
-    study_panel_id: panel.id,
-    question_type: 'mc',
-    prompt: 'Questão gerada sobre ' + topic,
-    options_json: ['Alternativa A','Alternativa correta','Alternativa C','Alternativa D'],
-    correct_answer: 'B',
-    created_by: 'ai',
-    difficulty: 'medio'
+    user_id: sessionUser.id, study_panel_id: panel.id, question_type: 'mc',
+    prompt: 'Questão gerada sobre ' + topic, options_json: ['Alternativa A','Alternativa correta','Alternativa C','Alternativa D'],
+    correct_answer: 'B', created_by: 'ai', difficulty: 'medio'
   });
   if(response.error){ alert('Erro ao gerar questão: ' + response.error.message); return; }
-  await loadQuestions();
-  activeQuestionIndex = questions.length ? questions.length - 1 : 0;
-  renderApp();
+  await loadQuestions(); activeQuestionIndex = questions.length ? questions.length - 1 : 0; renderApp();
 }
 
 function currentQuestion(){ return questions[activeQuestionIndex] || null; }
 function correctIndex(q){
   if(!q) return -1;
   if(q.question_type === 'ce') return String(q.correct_answer).toLowerCase().includes('certo') ? 0 : 1;
-  const map = {A:0,B:1,C:2,D:3};
-  return map[String(q.correct_answer).toUpperCase()] ?? -1;
+  const map = {A:0,B:1,C:2,D:3}; return map[String(q.correct_answer).toUpperCase()] ?? -1;
 }
 
 function renderApp(){
@@ -351,7 +337,7 @@ function renderApp(){
       </aside>
       <main class="main">
         <div class="hero">
-          <div><h1>Painel de Estudo</h1><p class="sub">Versão blindada contra travamento de sessão e com correção do botão Adicionar arquivo.</p></div>
+          <div><h1>Painel de Estudo</h1><p class="sub">Agora o botão busca arquivo no computador, envia para o Supabase Storage, só entra como base quando marcado e permite excluir.</p></div>
           <div class="top-actions"><button class="btn primary" id="newPanelTop">Nova aba</button><button class="btn" id="saveNow">Salvar agora</button></div>
         </div>
         <div class="tabs">
@@ -385,11 +371,13 @@ function renderApp(){
             </div>
             <div class="divider"></div>
             <h3>Base de arquivos para IA</h3>
-            <div class="sub">Clique em adicionar arquivo e ele deve aparecer logo abaixo.</div>
-            <div class="actions-row"><button class="btn small primary" id="addFileBtn">Adicionar arquivo</button></div>
+            <div class="sub">Somente os arquivos marcados entram como base da IA.</div>
+            <input type="file" id="realFileInput" class="hidden">
+            <div class="actions-row"><button class="btn small primary" id="addFileBtn">Buscar arquivo no computador</button></div>
             <div id="filesList">
-              ${files.length ? files.map(file => '<label class="file-item"><div class="file-left"><input type="checkbox" data-file="'+file.id+'" '+(file.is_selected_for_ai ? 'checked' : '')+'><div class="file-name">📄 '+esc(file.file_name)+'</div></div><span class="badge">'+(file.is_selected_for_ai ? 'Base ativa' : 'Inativo')+'</span></label>').join('') : '<div class="file-item">Nenhum arquivo registrado nessa aba.</div>'}
+              ${files.length ? files.map(file => '<div class="file-item"><div class="file-left"><input type="checkbox" data-file="'+file.id+'" '+(file.is_selected_for_ai ? 'checked' : '')+'><div class="file-name">📄 '+esc(file.file_name)+'</div></div><div class="actions-row"><a class="link small" href="'+esc(file.file_url || '#')+'" target="_blank" rel="noopener">'+(file.file_url ? 'abrir' : 'sem link')+'</a><button class="btn small danger" data-del="'+file.id+'">Excluir</button></div></div>').join('') : '<div class="file-item">Nenhum arquivo nessa aba.</div>'}
             </div>
+            <div class="small" style="margin-top:10px">Necessário ter um bucket chamado <strong>study-files</strong> no Supabase Storage.</div>
           </div>
         </div>
         <div class="card" style="margin-top:18px;">
@@ -419,16 +407,10 @@ function renderApp(){
   document.getElementById('newPanelSidebar').onclick = createNewPanel;
   document.getElementById('newPanelTop').onclick = createNewPanel;
   document.getElementById('saveNow').onclick = saveCurrentPanel;
-  document.getElementById('addFileBtn').onclick = addFile;
+  document.getElementById('addFileBtn').onclick = openFilePicker;
+  document.getElementById('realFileInput').onchange = uploadRealFile;
 
-  document.querySelectorAll('[data-panel]').forEach(btn => {
-    btn.onclick = async () => {
-      activePanelId = btn.dataset.panel;
-      await loadQuestions();
-      await loadFiles();
-      renderApp();
-    };
-  });
+  document.querySelectorAll('[data-panel]').forEach(btn => { btn.onclick = async () => { activePanelId = btn.dataset.panel; await loadQuestions(); await loadFiles(); renderApp(); }; });
 
   if(active){
     document.getElementById('panelTitle').addEventListener('input', e => { active.title = e.target.value; scheduleSave(active); });
@@ -442,7 +424,10 @@ function renderApp(){
     document.getElementById('pinkBtn').onclick = () => wrapSelection('background:#fbcfe8;color:#111827;padding:1px 4px;border-radius:4px;');
     document.getElementById('blueBtn').onclick = () => wrapSelection('background:#bae6fd;color:#111827;padding:1px 4px;border-radius:4px;');
   }
+
   document.querySelectorAll('[data-file]').forEach(chk => { chk.onchange = () => toggleFile(chk.dataset.file, chk.checked); });
+  document.querySelectorAll('[data-del]').forEach(btn => { btn.onclick = () => deleteFile(btn.dataset.del); });
+
   const newQuestionBtn = document.getElementById('newQuestionBtn'); if(newQuestionBtn) newQuestionBtn.onclick = createQuestionManual;
   const genQuestionBtn = document.getElementById('genQuestionBtn'); if(genQuestionBtn) genQuestionBtn.onclick = generateQuestionAI;
   const prevQuestion = document.getElementById('prevQuestion'); if(prevQuestion) prevQuestion.onclick = () => { activeQuestionIndex = Math.max(0, activeQuestionIndex - 1); showGabarito = false; highlightCorrect = false; renderApp(); };
@@ -466,21 +451,16 @@ async function createNewPanel(){
 }
 
 async function saveCurrentPanel(){
-  const active = getActivePanel();
-  if(!active) return;
+  const active = getActivePanel(); if(!active) return;
   setStatus('Salvando...');
   const ok = await updatePanelInDb(active);
   setStatus(ok ? 'Painel salvo no Supabase.' : 'Erro ao salvar painel.');
 }
 
 function wrapSelection(styleText){
-  const sel = window.getSelection();
-  if(!sel.rangeCount || sel.isCollapsed) return;
-  const range = sel.getRangeAt(0);
-  const span = document.createElement('span');
-  span.style.cssText = styleText;
-  try{ range.surroundContents(span); }
-  catch{ document.execCommand('insertHTML', false, '<span style="'+styleText+'">'+sel.toString()+'</span>'); }
+  const sel = window.getSelection(); if(!sel.rangeCount || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0); const span = document.createElement('span'); span.style.cssText = styleText;
+  try{ range.surroundContents(span); } catch{ document.execCommand('insertHTML', false, '<span style="'+styleText+'">'+sel.toString()+'</span>'); }
 }
 
 initApp();
