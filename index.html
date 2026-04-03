@@ -221,8 +221,7 @@ async function generateSummary(){
   try{
     status('Gerando resumo...');
     const data = await callAI('summary_from_files');
-    const html = '<h3>Resumo gerado pela IA</h3><p>'+String(data.summary||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/
-/g,'</p><p>')+'</p>';
+    const html = '<h3>Resumo gerado pela IA</h3><p>'+String(data.summary||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')..replace(/\n/g,'</p><p>');
     document.getElementById('editor').innerHTML = html;
     await savePanel();
     status('Resumo gerado.');
