@@ -221,11 +221,25 @@ async function generateSummary(){
   try{
     status('Gerando resumo...');
     const data = await callAI('summary_from_files');
-    const html = '<h3>Resumo gerado pela IA</h3><p>'+String(data.summary||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')..replace(/\n/g,'</p><p>');
+
+    const text = String(data.summary || '');
+
+    const safe = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '</p><p>');
+
+    const html = '<h3>Resumo gerado pela IA</h3><p>' + safe + '</p>';
+
     document.getElementById('editor').innerHTML = html;
+
     await savePanel();
     status('Resumo gerado.');
-  }catch(err){alert(err.message); status('Erro ao gerar resumo.')}
+  }catch(err){
+    alert(err.message);
+    status('Erro ao gerar resumo.');
+  }
 }
 
 async function generateQuestionsWithAI(){
